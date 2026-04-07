@@ -1,0 +1,11 @@
+systemet-poll-cli
+systemet-poll-api
+systemet-ass
+config.json
+*.db
+frontend/node_modules/
+frontend/dist/
+cmd/api/frontend/dist/
+*.tar
+*.tar.gz
+data/

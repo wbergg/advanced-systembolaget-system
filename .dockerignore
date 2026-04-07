@@ -1,0 +1,14 @@
+*.db
+*.db-wal
+*.db-shm
+config.json
+data/
+.git/
+.claude/
+frontend/node_modules/
+frontend/dist/
+systemet-ass
+systemet-poll-cli
+*.tar
+*.tar.gz
+README.md

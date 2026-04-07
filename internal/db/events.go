@@ -1,0 +1,458 @@
+package db
+
+import (
+	"fmt"
+	"time"
+)
+
+type Event struct {
+	ID            int             `json:"id"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	EventDate     string          `json:"eventDate"`
+	OwnerID       int             `json:"ownerId"`
+	OwnerName     string          `json:"ownerName"`
+	Locked        bool            `json:"locked"`
+	Type          string          `json:"type"`
+	BasketID      *int            `json:"basketId"`
+	Hidden        bool            `json:"hidden"`
+	CreatedAt     time.Time       `json:"createdAt"`
+	Attendees     []EventAttendee `json:"attendees,omitempty"`
+	Beers         []EventBeer     `json:"beers,omitempty"`
+	Scores        []EventScore    `json:"scores,omitempty"`
+	AttendeeCount int             `json:"attendeeCount"`
+	BeerCount     int             `json:"beerCount"`
+}
+
+type EventAttendee struct {
+	UserID   int    `json:"userId"`
+	Username string `json:"username"`
+}
+
+type EventBeer struct {
+	ID              int     `json:"id"`
+	ProductID       string  `json:"productId"`
+	ProductNameBold string  `json:"productNameBold"`
+	ProductNameThin *string `json:"productNameThin"`
+	ProducerName    string  `json:"producerName"`
+	ImageURL        string  `json:"imageUrl"`
+}
+
+type EventScore struct {
+	EventBeerID int `json:"eventBeerId"`
+	UserID      int `json:"userId"`
+	Score       int `json:"score"`
+}
+
+func (db *DB) CanAccessEvent(eventID, userID int, isAdmin bool) (isOwner bool, err error) {
+	if isAdmin {
+		return true, nil
+	}
+	return db.canAccessEvent(eventID, userID)
+}
+
+func (db *DB) canAccessEvent(eventID, userID int) (isOwner bool, err error) {
+	var ownerID int
+	err = db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	if err != nil {
+		return false, fmt.Errorf("event not found")
+	}
+	if ownerID == userID {
+		return true, nil
+	}
+	var count int
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM event_attendees WHERE event_id = ? AND user_id = ?", eventID, userID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return false, nil
+	}
+	return false, fmt.Errorf("event not found")
+}
+
+func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
+	adminVal := 0
+	if isAdmin {
+		adminVal = 1
+	}
+	rows, err := db.conn.Query(`
+		SELECT e.id, e.name, e.description, e.event_date,
+			e.user_id, COALESCE(u.username, ''), e.locked,
+			e.type, e.basket_id, e.hidden,
+			e.created_at,
+			(SELECT COUNT(*) FROM event_attendees WHERE event_id = e.id) AS attendee_count,
+			CASE WHEN e.type = 'roll'
+				THEN (SELECT COUNT(*) FROM roll_pool WHERE event_id = e.id)
+				ELSE (SELECT COUNT(*) FROM event_beers WHERE event_id = e.id)
+			END AS beer_count
+		FROM events e
+		LEFT JOIN users u ON e.user_id = u.id
+		WHERE (e.user_id = ? OR e.id IN (SELECT event_id FROM event_attendees WHERE user_id = ?))
+		  AND (e.hidden = 0 OR ? = 1)
+		ORDER BY e.created_at DESC
+	`, userID, userID, adminVal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []Event
+	for rows.Next() {
+		var ev Event
+		if err := rows.Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
+			&ev.OwnerID, &ev.OwnerName, &ev.Locked,
+			&ev.Type, &ev.BasketID, &ev.Hidden,
+			&ev.CreatedAt,
+			&ev.AttendeeCount, &ev.BeerCount); err != nil {
+			return nil, err
+		}
+		events = append(events, ev)
+	}
+	return events, rows.Err()
+}
+
+func (db *DB) CreateEvent(name, description, eventDate string, userID int, eventType string, basketID *int) (*Event, error) {
+	if eventType == "" {
+		eventType = "tasting"
+	}
+	hidden := 0
+	if eventType == "roll" {
+		hidden = 1
+		if basketID == nil {
+			return nil, fmt.Errorf("basket is required for roll events")
+		}
+	}
+
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
+		"INSERT INTO events (name, description, event_date, user_id, type, basket_id, hidden) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		name, description, eventDate, userID, eventType, basketID, hidden)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+
+	// For roll events, expand basket items into roll_pool (1 row per quantity unit)
+	if eventType == "roll" {
+		rows, err := tx.Query("SELECT product_id, quantity FROM basket_items WHERE basket_id = ?", *basketID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var productID string
+			var qty int
+			if err := rows.Scan(&productID, &qty); err != nil {
+				return nil, err
+			}
+			for i := 0; i < qty; i++ {
+				_, err := tx.Exec("INSERT INTO roll_pool (event_id, product_id) VALUES (?, ?)", id, productID)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return &Event{
+		ID: int(id), Name: name, Description: description, EventDate: eventDate,
+		OwnerID: userID, Type: eventType, BasketID: basketID, Hidden: hidden == 1,
+		CreatedAt: time.Now(),
+	}, nil
+}
+
+func (db *DB) GetEvent(id, userID int, isAdmin bool) (*Event, error) {
+	if !isAdmin {
+		_, err := db.canAccessEvent(id, userID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var ev Event
+	err := db.conn.QueryRow(`
+		SELECT e.id, e.name, e.description, e.event_date,
+			e.user_id, COALESCE(u.username, ''), e.locked,
+			e.type, e.basket_id, e.hidden,
+			e.created_at
+		FROM events e LEFT JOIN users u ON e.user_id = u.id
+		WHERE e.id = ?
+	`, id).Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
+		&ev.OwnerID, &ev.OwnerName, &ev.Locked,
+		&ev.Type, &ev.BasketID, &ev.Hidden,
+		&ev.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Hidden events only accessible by admins
+	if ev.Hidden && !isAdmin {
+		return nil, fmt.Errorf("event not found")
+	}
+
+	// Attendees
+	attRows, err := db.conn.Query(`
+		SELECT ea.user_id, u.username
+		FROM event_attendees ea JOIN users u ON ea.user_id = u.id
+		WHERE ea.event_id = ?
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer attRows.Close()
+	for attRows.Next() {
+		var a EventAttendee
+		if err := attRows.Scan(&a.UserID, &a.Username); err != nil {
+			return nil, err
+		}
+		ev.Attendees = append(ev.Attendees, a)
+	}
+	ev.AttendeeCount = len(ev.Attendees)
+
+	// Beers (only for tasting events)
+	if ev.Type != "roll" {
+		beerRows, err := db.conn.Query(`
+			SELECT eb.id, eb.product_id, p.name_bold, p.name_thin, p.producer_name, p.image_url
+			FROM event_beers eb
+			JOIN products p ON eb.product_id = p.product_id
+			WHERE eb.event_id = ?
+			ORDER BY eb.added_at
+		`, id)
+		if err != nil {
+			return nil, err
+		}
+		defer beerRows.Close()
+		for beerRows.Next() {
+			var b EventBeer
+			if err := beerRows.Scan(&b.ID, &b.ProductID, &b.ProductNameBold, &b.ProductNameThin, &b.ProducerName, &b.ImageURL); err != nil {
+				return nil, err
+			}
+			ev.Beers = append(ev.Beers, b)
+		}
+		ev.BeerCount = len(ev.Beers)
+
+		// Scores
+		scoreRows, err := db.conn.Query(`
+			SELECT es.event_beer_id, es.user_id, es.score
+			FROM event_scores es
+			JOIN event_beers eb ON es.event_beer_id = eb.id
+			WHERE eb.event_id = ?
+		`, id)
+		if err != nil {
+			return nil, err
+		}
+		defer scoreRows.Close()
+		for scoreRows.Next() {
+			var s EventScore
+			if err := scoreRows.Scan(&s.EventBeerID, &s.UserID, &s.Score); err != nil {
+				return nil, err
+			}
+			ev.Scores = append(ev.Scores, s)
+		}
+	} else {
+		// For roll events, beer count comes from roll_pool
+		var cnt int
+		if err := db.conn.QueryRow("SELECT COUNT(*) FROM roll_pool WHERE event_id = ?", id).Scan(&cnt); err != nil {
+			return nil, err
+		}
+		ev.BeerCount = cnt
+	}
+
+	return &ev, nil
+}
+
+func (db *DB) UpdateEvent(id int, name, description, eventDate string, userID int) error {
+	res, err := db.conn.Exec(
+		"UPDATE events SET name = ?, description = ?, event_date = ? WHERE id = ? AND user_id = ?",
+		name, description, eventDate, id, userID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("event not found or not owned by you")
+	}
+	return nil
+}
+
+func (db *DB) DeleteEvent(id, userID int) error {
+	res, err := db.conn.Exec("DELETE FROM events WHERE id = ? AND user_id = ?", id, userID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("event not found or not owned by you")
+	}
+	return nil
+}
+
+func (db *DB) SetEventLocked(eventID int, locked bool, userID int, isAdmin bool) error {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	if err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if ownerID != userID && !isAdmin {
+		return fmt.Errorf("only the owner or admin can lock/unlock an event")
+	}
+	val := 0
+	if locked {
+		val = 1
+	}
+	_, err = db.conn.Exec("UPDATE events SET locked = ? WHERE id = ?", val, eventID)
+	return err
+}
+
+func (db *DB) InviteToEvent(eventID, ownerID, targetUserID int) error {
+	if ownerID == targetUserID {
+		return fmt.Errorf("cannot invite yourself")
+	}
+	var actualOwner int
+	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&actualOwner)
+	if err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if actualOwner != ownerID {
+		return fmt.Errorf("only the owner can invite users")
+	}
+	_, err = db.conn.Exec(`
+		INSERT INTO event_attendees (event_id, user_id) VALUES (?, ?)
+		ON CONFLICT DO NOTHING
+	`, eventID, targetUserID)
+	return err
+}
+
+func (db *DB) UninviteFromEvent(eventID, callerID, targetUserID int) error {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	if err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if callerID != ownerID && callerID != targetUserID {
+		return fmt.Errorf("not allowed")
+	}
+	_, err = db.conn.Exec("DELETE FROM event_attendees WHERE event_id = ? AND user_id = ?", eventID, targetUserID)
+	return err
+}
+
+func (db *DB) ImportBasketToEvent(eventID, basketID, userID int, isAdmin bool) error {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	if err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if ownerID != userID && !isAdmin {
+		return fmt.Errorf("only the owner or admin can import baskets")
+	}
+	_, err = db.conn.Exec(`
+		INSERT OR IGNORE INTO event_beers (event_id, product_id)
+		SELECT ?, product_id FROM basket_items WHERE basket_id = ?
+	`, eventID, basketID)
+	return err
+}
+
+func (db *DB) AddBeerToEvent(eventID int, productID string, userID int, isAdmin bool) error {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	if err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if ownerID != userID && !isAdmin {
+		return fmt.Errorf("only the owner or admin can add beers")
+	}
+	_, err = db.conn.Exec(`
+		INSERT INTO event_beers (event_id, product_id) VALUES (?, ?)
+		ON CONFLICT DO NOTHING
+	`, eventID, productID)
+	return err
+}
+
+func (db *DB) RemoveBeerFromEvent(eventID, eventBeerID, userID int, isAdmin bool) error {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	if err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if ownerID != userID && !isAdmin {
+		return fmt.Errorf("only the owner or admin can remove beers")
+	}
+	res, err := db.conn.Exec("DELETE FROM event_beers WHERE id = ? AND event_id = ?", eventBeerID, eventID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("beer not found in event")
+	}
+	return nil
+}
+
+func (db *DB) SetScore(eventBeerID, userID, score int) error {
+	// Verify the event_beer exists and get event_id
+	var eventID int
+	err := db.conn.QueryRow("SELECT event_id FROM event_beers WHERE id = ?", eventBeerID).Scan(&eventID)
+	if err != nil {
+		return fmt.Errorf("beer not found")
+	}
+
+	// Check event is not locked
+	var locked bool
+	if err := db.conn.QueryRow("SELECT locked FROM events WHERE id = ?", eventID).Scan(&locked); err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if locked {
+		return fmt.Errorf("event is locked")
+	}
+
+	// Check user has access (owner or attendee)
+	_, err = db.canAccessEvent(eventID, userID)
+	if err != nil {
+		return err
+	}
+
+	if score < 0 || score > 10 {
+		return fmt.Errorf("score must be 0-10")
+	}
+
+	_, err = db.conn.Exec(`
+		INSERT INTO event_scores (event_beer_id, user_id, score, updated_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(event_beer_id, user_id) DO UPDATE SET score = excluded.score, updated_at = CURRENT_TIMESTAMP
+	`, eventBeerID, userID, score)
+	return err
+}
+
+func (db *DB) DeleteScore(eventBeerID, userID int) error {
+	var eventID int
+	err := db.conn.QueryRow("SELECT event_id FROM event_beers WHERE id = ?", eventBeerID).Scan(&eventID)
+	if err != nil {
+		return fmt.Errorf("beer not found")
+	}
+	var locked bool
+	if err := db.conn.QueryRow("SELECT locked FROM events WHERE id = ?", eventID).Scan(&locked); err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if locked {
+		return fmt.Errorf("event is locked")
+	}
+	_, err = db.canAccessEvent(eventID, userID)
+	if err != nil {
+		return err
+	}
+	_, err = db.conn.Exec("DELETE FROM event_scores WHERE event_beer_id = ? AND user_id = ?", eventBeerID, userID)
+	return err
+}

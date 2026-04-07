@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: systemet-app
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.json:/app/config.json
+      - app-data:/app/data
+    environment:
+      - GIN_MODE=release
+    restart: unless-stopped
+
+volumes:
+  app-data:
