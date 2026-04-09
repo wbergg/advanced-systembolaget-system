@@ -22,6 +22,10 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
 
+	// Migrations
+	conn.Exec("ALTER TABLE products ADD COLUMN assortment TEXT DEFAULT ''")
+	conn.Exec("ALTER TABLE products ADD COLUMN product_launch_date TEXT DEFAULT ''")
+
 	return &DB{conn: conn}, nil
 }
 
@@ -59,6 +63,8 @@ func initSchema(conn *sql.DB) error {
 			is_organic       INTEGER,
 			is_news          INTEGER,
 			packaging_level1 TEXT,
+			assortment       TEXT DEFAULT '',
+			product_launch_date TEXT DEFAULT '',
 			vintage          TEXT,
 			image_url        TEXT,
 			synced_at        DATETIME DEFAULT CURRENT_TIMESTAMP

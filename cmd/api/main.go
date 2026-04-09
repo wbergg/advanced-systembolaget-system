@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	systemetpoll "advanced-systembolaget-system"
 	"advanced-systembolaget-system/internal/auth"
@@ -150,6 +151,7 @@ func main() {
 			authed.DELETE("/shared-lists/:id", deleteSharedList(database))
 			authed.POST("/shared-lists/:id/items", addToSharedList(database))
 			authed.DELETE("/shared-lists/:id/items/:productId", removeFromSharedList(database))
+			authed.POST("/shared-lists/:id/import-basket", importBasketToSharedList(database))
 		}
 
 		// Public shared list endpoint (no auth)
@@ -165,6 +167,8 @@ func main() {
 			admin.DELETE("/users/:id", userHandler.Delete)
 			admin.POST("/impersonate/:id", authHandler.Impersonate)
 			admin.DELETE("/comments/:id", deleteComment(database))
+			admin.DELETE("/products/:id", deleteProductHandler(database))
+			admin.DELETE("/products", deleteAllProductsHandler(database))
 		}
 	}
 
@@ -198,17 +202,23 @@ func spaHandler(fsys http.FileSystem) http.Handler {
 func listProducts(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		f := db.ListFilter{
-			Search:    c.Query("search"),
-			Category:  c.Query("category"),
-			SortBy:    c.DefaultQuery("sortBy", "name"),
-			SortDir:   c.DefaultQuery("sortDir", "asc"),
-			Name:      c.Query("name"),
-			Producer:  c.Query("producer"),
-			Country:   c.Query("country"),
-			Packaging: c.Query("packaging"),
-			Volume:    c.Query("volume"),
+			Search:   c.Query("search"),
+			Category: c.Query("category"),
+			SortBy:   c.DefaultQuery("sortBy", "name"),
+			SortDir:  c.DefaultQuery("sortDir", "asc"),
+			Name:     c.Query("name"),
+			Producer: c.Query("producer"),
 		}
 
+		if v := c.Query("country"); v != "" {
+			f.Countries = strings.Split(v, ",")
+		}
+		if v := c.Query("packaging"); v != "" {
+			f.Packagings = strings.Split(v, ",")
+		}
+		if v := c.Query("volume"); v != "" {
+			f.Volumes = strings.Split(v, ",")
+		}
 		if p := c.Query("page"); p != "" {
 			f.Page, _ = strconv.Atoi(p)
 		}
@@ -222,6 +232,14 @@ func listProducts(database *db.DB) gin.HandlerFunc {
 		if v := c.Query("maxPrice"); v != "" {
 			p, _ := strconv.ParseFloat(v, 64)
 			f.MaxPrice = &p
+		}
+		if v := c.Query("minAbv"); v != "" {
+			p, _ := strconv.ParseFloat(v, 64)
+			f.MinAbv = &p
+		}
+		if v := c.Query("maxAbv"); v != "" {
+			p, _ := strconv.ParseFloat(v, 64)
+			f.MaxAbv = &p
 		}
 
 		products, total, err := database.ListProducts(f)
@@ -327,6 +345,27 @@ func deleteComment(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func deleteProductHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := database.DeleteProduct(c.Param("id")); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func deleteAllProductsHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		n, err := database.DeleteAllProducts()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"deleted": n})
 	}
 }
 
@@ -1246,6 +1285,30 @@ func removeFromSharedList(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func importBasketToSharedList(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid list id"})
+			return
+		}
+		var body struct {
+			BasketID int `json:"basketId"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.BasketID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "basketId is required"})
+			return
+		}
+		changed, err := database.ImportBasketToSharedList(id, body.BasketID, claims.UserID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"imported": changed})
 	}
 }
 

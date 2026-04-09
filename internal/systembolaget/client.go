@@ -145,7 +145,7 @@ func FetchAll(apiKey string, query url.Values, progress ProgressFunc) ([]Product
 		resp.Body.Close()
 
 		for _, rp := range sr.Products {
-			if rp.IsRegionalRestricted {
+			if rp.IsRegionalRestricted || rp.IsDiscontinued || rp.IsCompletelyOutOfStock || rp.IsTemporaryOutOfStock {
 				continue
 			}
 			p := rp.Product
@@ -166,5 +166,25 @@ func FetchAll(apiKey string, query url.Values, progress ProgressFunc) ([]Product
 		page = sr.Metadata.NextPage
 	}
 
-	return all, nil
+	// Deduplicate by name (productNameBold + productNameThin), keeping newest launch date
+	seen := make(map[string]int) // name key -> index in deduped
+	var deduped []Product
+	for _, p := range all {
+		thin := ""
+		if p.ProductNameThin != nil {
+			thin = *p.ProductNameThin
+		}
+		key := p.ProductNameBold + "\x00" + thin
+		if idx, ok := seen[key]; ok {
+			// Keep the one with the newer launch date
+			if p.ProductLaunchDate > deduped[idx].ProductLaunchDate {
+				deduped[idx] = p
+			}
+		} else {
+			seen[key] = len(deduped)
+			deduped = append(deduped, p)
+		}
+	}
+
+	return deduped, nil
 }

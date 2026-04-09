@@ -3,11 +3,11 @@ import { ref, onMounted } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
-import { listUsers, createUser, updateUser, deleteUser, type AuthUser } from '../api/client'
+import { listUsers, createUser, updateUser, deleteUser, deleteAllProducts, type AuthUser } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; productsChanged: [] }>()
 
 const users = ref<AuthUser[]>([])
 const error = ref<string | null>(null)
@@ -93,6 +93,24 @@ async function doImpersonate(userId: number) {
   }
 }
 
+const purging = ref(false)
+const purgeResult = ref<string | null>(null)
+
+async function doPurgeProducts() {
+  if (!confirm('Delete ALL products from the database? This cannot be undone.')) return
+  purging.value = true
+  purgeResult.value = null
+  try {
+    const res = await deleteAllProducts()
+    purgeResult.value = `Deleted ${res.deleted} products.`
+    emit('productsChanged')
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    purging.value = false
+  }
+}
+
 onMounted(loadUsers)
 </script>
 
@@ -174,6 +192,18 @@ onMounted(loadUsers)
     <div v-if="users.length === 0" class="empty-state">
       No users found.
     </div>
+
+    <div class="danger-zone">
+      <h4>Danger Zone</h4>
+      <div class="danger-row">
+        <div>
+          <strong>Remove all products</strong>
+          <p class="danger-desc">Delete every product from the database. Baskets and lists referencing them will break.</p>
+        </div>
+        <Button label="Delete all products" icon="pi pi-trash" severity="danger" size="small" :loading="purging" @click="doPurgeProducts" />
+      </div>
+      <span v-if="purgeResult" class="purge-result">{{ purgeResult }}</span>
+    </div>
   </div>
 </template>
 
@@ -223,5 +253,37 @@ onMounted(loadUsers)
   padding: 0.75rem 0;
   text-align: center;
   font-size: 0.875rem;
+}
+
+.danger-zone {
+  margin-top: 1.5rem;
+  border-top: 2px solid var(--danger);
+  padding-top: 1rem;
+}
+
+.danger-zone h4 {
+  color: var(--danger);
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.danger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.danger-desc {
+  margin: 0.15rem 0 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.purge-result {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
+  display: block;
 }
 </style>

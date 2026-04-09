@@ -30,6 +30,7 @@ var ParamMappings = []ParamMapping{
 	{"argang", "vintage", "Vintage year"},
 	{"sortiment", "assortmentText", "Assortment (e.g. Fast sortiment)"},
 	{"nyhet", "isNews", "Only new products (true/false)"},
+	{"butik", "siteId", "Store/site ID (e.g. 0176)"},
 }
 
 // RegisterFlags registers CLI flags from the param mappings table.

@@ -32,6 +32,8 @@ type BasketItem struct {
 	Price            float64 `json:"price"`
 	VolumeText       string  `json:"volumeText"`
 	AlcoholPercent   float64 `json:"alcoholPercentage"`
+	Country          string  `json:"country"`
+	PackagingLevel1  string  `json:"packagingLevel1"`
 	ImageURL         string  `json:"imageUrl"`
 	Quantity         int     `json:"quantity"`
 	AddedBy          string  `json:"addedBy"`
@@ -161,8 +163,8 @@ func (db *DB) GetBasket(id int, userID int) (*Basket, error) {
 
 	rows, err := db.conn.Query(`
 		SELECT bi.product_id, p.name_bold, p.name_thin, p.producer_name,
-			p.price, p.volume_text, p.alcohol_pct, p.image_url, bi.quantity,
-			COALESCE(u.username, '')
+			p.price, p.volume_text, p.alcohol_pct, p.country, p.packaging_level1,
+			p.image_url, bi.quantity, COALESCE(u.username, '')
 		FROM basket_items bi
 		JOIN products p ON bi.product_id = p.product_id
 		LEFT JOIN users u ON bi.added_by = u.id
@@ -177,8 +179,9 @@ func (db *DB) GetBasket(id int, userID int) (*Basket, error) {
 	for rows.Next() {
 		var item BasketItem
 		if err := rows.Scan(&item.ProductID, &item.ProductNameBold, &item.ProductNameThin,
-			&item.ProducerName, &item.Price, &item.VolumeText, &item.AlcoholPercent, &item.ImageURL, &item.Quantity,
-			&item.AddedBy); err != nil {
+			&item.ProducerName, &item.Price, &item.VolumeText, &item.AlcoholPercent,
+			&item.Country, &item.PackagingLevel1,
+			&item.ImageURL, &item.Quantity, &item.AddedBy); err != nil {
 			return nil, err
 		}
 		b.Items = append(b.Items, item)

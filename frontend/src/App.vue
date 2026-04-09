@@ -94,6 +94,8 @@ onUnmounted(() => {
 function onSynced() {
   showSync.value = false
   tableRef.value?.reload()
+  basketRef.value?.refreshActive()
+  sharedListRef.value?.refreshActive()
 }
 
 function onActiveBasketChanged(id: number | undefined) {
@@ -176,7 +178,7 @@ function onNewBasket(id: number) {
       </button>
     </nav>
 
-    <AdminPanel v-if="showAdmin" @close="showAdmin = false" />
+    <AdminPanel v-if="showAdmin" @close="showAdmin = false" @productsChanged="tableRef?.reload(); basketRef?.refreshActive(); sharedListRef?.refreshActive()" />
     <ChangePassword v-if="showSettings" @close="showSettings = false" />
     <SyncPanel v-if="showSync" @synced="onSynced" @cancel="showSync = false" />
 

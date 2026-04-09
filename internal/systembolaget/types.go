@@ -25,9 +25,14 @@ type Product struct {
 	AssortmentText  string  `json:"assortmentText"`
 	Taste           string  `json:"taste"`
 	Usage           string  `json:"usage"`
-	IsOrganic       bool    `json:"isOrganic"`
-	IsNews          bool    `json:"isNews"`
+	IsOrganic              bool    `json:"isOrganic"`
+	IsNews                 bool    `json:"isNews"`
+	IsDiscontinued         bool    `json:"isDiscontinued"`
+	IsCompletelyOutOfStock bool    `json:"isCompletelyOutOfStock"`
+	IsTemporaryOutOfStock  bool    `json:"isTemporaryOutOfStock"`
 	PackagingLevel1        string  `json:"packagingLevel1"`
+	Assortment             string  `json:"assortment"`
+	ProductLaunchDate      string  `json:"productLaunchDate"`
 	IsRegionalRestricted   bool    `json:"isRegionalRestricted"`
 	Vintage                *string `json:"vintage"`
 	ImageURL               string  `json:"imageUrl,omitempty"`

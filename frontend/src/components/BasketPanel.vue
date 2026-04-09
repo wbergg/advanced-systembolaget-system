@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Dialog from 'primevue/dialog'
 import Checkbox from 'primevue/checkbox'
 import ProductDetail from './ProductDetail.vue'
 import { useAuthStore } from '../stores/auth'
+import Textarea from 'primevue/textarea'
 import {
   listBaskets, createBasket, getBasket, deleteBasket,
   removeFromBasket, updateBasketItemQty, renameBasket,
   getProduct, shareBasket, unshareBasket, listAllUsers,
-  setBasketLocked,
+  setBasketLocked, addToBasket,
   type Basket, type Product, type ShareUser
 } from '../api/client'
 
@@ -22,6 +23,52 @@ const editingBasketId = ref<number | null>(null)
 const editingName = ref('')
 const emit = defineEmits<{ 'update:activeId': [id: number | undefined] }>()
 const loading = ref(false)
+
+// Basket sort
+const basketSortField = ref<string | null>(null)
+const basketSortDir = ref<'asc' | 'desc'>('asc')
+
+function toggleBasketSort(field: string) {
+  if (basketSortField.value === field) {
+    basketSortDir.value = basketSortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    basketSortField.value = field
+    basketSortDir.value = 'asc'
+  }
+}
+
+function basketSortIcon(field: string): string {
+  if (basketSortField.value !== field) return 'pi pi-sort-alt'
+  return basketSortDir.value === 'asc' ? 'pi pi-sort-amount-up-alt' : 'pi pi-sort-amount-down'
+}
+
+const sortedBasketItems = computed(() => {
+  const items = activeBasket.value?.items
+  if (!items) return []
+  if (!basketSortField.value) return items
+
+  const dir = basketSortDir.value === 'asc' ? 1 : -1
+  const field = basketSortField.value
+
+  return [...items].sort((a, b) => {
+    let va: string | number, vb: string | number
+    switch (field) {
+      case 'name': va = a.productNameBold.toLowerCase(); vb = b.productNameBold.toLowerCase(); break
+      case 'abv': va = a.alcoholPercentage; vb = b.alcoholPercentage; break
+      case 'volume': va = a.volumeText; vb = b.volumeText; break
+      case 'pkg': va = a.packagingLevel1; vb = b.packagingLevel1; break
+      case 'country': va = a.country; vb = b.country; break
+      case 'price': va = a.price; vb = b.price; break
+      case 'qty': va = a.quantity; vb = b.quantity; break
+      case 'subtotal': va = a.price * a.quantity; vb = b.price * b.quantity; break
+      case 'addedBy': va = a.addedBy; vb = b.addedBy; break
+      default: return 0
+    }
+    if (va < vb) return -1 * dir
+    if (va > vb) return 1 * dir
+    return 0
+  })
+})
 
 // Sharing state
 const shareDialogVisible = ref(false)
@@ -183,6 +230,86 @@ async function leaveSharedBasket() {
   await loadBaskets()
 }
 
+// Export / Import
+const exportDialogVisible = ref(false)
+const exportText = ref('')
+const exportCopied = ref(false)
+
+const importDialogVisible = ref(false)
+const importText = ref('')
+const importBusy = ref(false)
+const importResult = ref<string | null>(null)
+
+function doExport() {
+  if (!activeBasket.value?.items?.length) return
+  const data = {
+    name: activeBasket.value.name,
+    items: activeBasket.value.items.map(i => ({
+      productId: i.productId,
+      quantity: i.quantity,
+    })),
+  }
+  exportText.value = JSON.stringify(data)
+  exportCopied.value = false
+  exportDialogVisible.value = true
+}
+
+async function copyExport() {
+  await navigator.clipboard.writeText(exportText.value)
+  exportCopied.value = true
+  setTimeout(() => { exportCopied.value = false }, 2000)
+}
+
+function openImport() {
+  importText.value = ''
+  importResult.value = null
+  importDialogVisible.value = true
+}
+
+async function doImport() {
+  importResult.value = null
+  let parsed: { name?: string; items: { productId: string; quantity: number }[] }
+  try {
+    parsed = JSON.parse(importText.value)
+  } catch {
+    importResult.value = 'Invalid JSON.'
+    return
+  }
+  if (!parsed.items || !Array.isArray(parsed.items) || parsed.items.length === 0) {
+    importResult.value = 'No items found in data.'
+    return
+  }
+
+  importBusy.value = true
+  try {
+    let basketId = activeBasket.value?.id
+    if (!basketId) {
+      const name = parsed.name || `Import ${new Date().toLocaleDateString('sv-SE')}`
+      const b = await createBasket(name)
+      basketId = b.id
+      emit('update:activeId', basketId)
+    }
+    let added = 0
+    let failed = 0
+    for (const item of parsed.items) {
+      if (!item.productId) continue
+      try {
+        await addToBasket(basketId, item.productId, item.quantity || 1)
+        added++
+      } catch {
+        failed++
+      }
+    }
+    await loadBaskets()
+    await selectBasket(basketId)
+    importDialogVisible.value = false
+  } catch (e: any) {
+    importResult.value = `Error: ${e?.message || String(e)}`
+  } finally {
+    importBusy.value = false
+  }
+}
+
 defineExpose({ loadBaskets, refreshActive })
 
 onMounted(loadBaskets)
@@ -254,7 +381,7 @@ onMounted(loadBaskets)
     </template>
 
     <!-- Controls for active basket -->
-    <div v-if="activeBasket && (isOwner(activeBasket) || canToggleLock(activeBasket))" class="share-bar">
+    <div v-if="activeBasket" class="share-bar">
       <Button v-if="isOwner(activeBasket)" label="Share" icon="pi pi-share-alt" size="small" severity="secondary" @click="openShareDialog" />
       <Button v-if="canToggleLock(activeBasket)"
         :label="activeBasket.locked ? 'Unlock' : 'Lock'"
@@ -263,6 +390,8 @@ onMounted(loadBaskets)
         :severity="activeBasket.locked ? 'warn' : 'secondary'"
         @click="toggleLock"
       />
+      <Button label="Export" icon="pi pi-upload" size="small" severity="secondary" @click="doExport" :disabled="!activeBasket.items?.length" />
+      <Button label="Import" icon="pi pi-download" size="small" severity="secondary" @click="openImport" :disabled="activeBasket.locked" />
       <span v-if="activeBasket.locked" class="locked-badge">
         <i class="pi pi-lock" style="font-size: 0.65rem"></i> Locked — no edits allowed
       </span>
@@ -273,24 +402,30 @@ onMounted(loadBaskets)
         </span>
       </span>
     </div>
+    <!-- Import/Export also available when no basket selected -->
+    <div v-else-if="!activeBasket && baskets.length >= 0" class="share-bar">
+      <Button label="Import" icon="pi pi-download" size="small" severity="secondary" @click="openImport" />
+    </div>
 
     <div v-if="activeBasket && activeBasket.items && activeBasket.items.length > 0">
       <table class="clean-table">
         <thead>
           <tr>
             <th></th>
-            <th>Product</th>
-            <th>ABV%</th>
-            <th>Volume</th>
-            <th>Price</th>
-            <th style="width: 80px;">Qty</th>
-            <th style="text-align: right;">Subtotal</th>
-            <th>Added by</th>
+            <th><span class="sort-header" :class="{ active: basketSortField === 'name' }" @click="toggleBasketSort('name')">Product <i :class="basketSortIcon('name')"></i></span></th>
+            <th><span class="sort-header" :class="{ active: basketSortField === 'abv' }" @click="toggleBasketSort('abv')">ABV% <i :class="basketSortIcon('abv')"></i></span></th>
+            <th><span class="sort-header" :class="{ active: basketSortField === 'volume' }" @click="toggleBasketSort('volume')">Volume <i :class="basketSortIcon('volume')"></i></span></th>
+            <th><span class="sort-header" :class="{ active: basketSortField === 'pkg' }" @click="toggleBasketSort('pkg')">Pkg <i :class="basketSortIcon('pkg')"></i></span></th>
+            <th><span class="sort-header" :class="{ active: basketSortField === 'country' }" @click="toggleBasketSort('country')">Country <i :class="basketSortIcon('country')"></i></span></th>
+            <th><span class="sort-header" :class="{ active: basketSortField === 'price' }" @click="toggleBasketSort('price')">Price <i :class="basketSortIcon('price')"></i></span></th>
+            <th style="width: 80px;"><span class="sort-header" :class="{ active: basketSortField === 'qty' }" @click="toggleBasketSort('qty')">Qty <i :class="basketSortIcon('qty')"></i></span></th>
+            <th style="text-align: right;"><span class="sort-header" :class="{ active: basketSortField === 'subtotal' }" @click="toggleBasketSort('subtotal')">Subtotal <i :class="basketSortIcon('subtotal')"></i></span></th>
+            <th><span class="sort-header" :class="{ active: basketSortField === 'addedBy' }" @click="toggleBasketSort('addedBy')">Added by <i :class="basketSortIcon('addedBy')"></i></span></th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in activeBasket.items" :key="item.productId">
+          <tr v-for="item in sortedBasketItems" :key="item.productId">
             <td class="clickable" @click="openProductDetail(item.productId)">
               <img v-if="item.imageUrl" :src="item.imageUrl.replace('_400.', '_60.')" class="basket-thumb" />
             </td>
@@ -302,6 +437,8 @@ onMounted(loadBaskets)
             </td>
             <td>{{ item.alcoholPercentage }}%</td>
             <td>{{ item.volumeText }}</td>
+            <td>{{ item.packagingLevel1 }}</td>
+            <td>{{ item.country }}</td>
             <td>{{ item.price }} kr</td>
             <td>
               <div class="qty-control">
@@ -319,7 +456,7 @@ onMounted(loadBaskets)
         </tbody>
         <tfoot>
           <tr>
-            <td colspan="7" style="font-weight: 700;">Total</td>
+            <td colspan="9" style="font-weight: 700;">Total</td>
             <td style="text-align: right; font-weight: 700;">{{ activeBasket.total.toFixed(1) }} kr</td>
             <td></td>
           </tr>
@@ -359,10 +496,68 @@ onMounted(loadBaskets)
       <div v-if="detailLoading" class="empty-state" style="padding: 2rem;">Loading...</div>
       <ProductDetail v-else-if="detailProduct" :product="detailProduct" @updated="async () => { detailProduct = await getProduct(detailProduct!.productId) }" />
     </Dialog>
+
+    <!-- Export dialog -->
+    <Dialog v-model:visible="exportDialogVisible" modal header="Export Basket" :style="{ width: '500px', maxWidth: '95vw' }">
+      <div class="export-dialog-body">
+        <p class="dialog-hint">Copy this text and paste it on another system to import.</p>
+        <Textarea :modelValue="exportText" readonly autoResize style="width: 100%; font-family: monospace; font-size: 0.8rem;" rows="5" />
+        <div style="margin-top: 0.75rem;">
+          <Button :label="exportCopied ? 'Copied!' : 'Copy to clipboard'" :icon="exportCopied ? 'pi pi-check' : 'pi pi-copy'" size="small" @click="copyExport" />
+        </div>
+      </div>
+    </Dialog>
+
+    <!-- Import dialog -->
+    <Dialog v-model:visible="importDialogVisible" modal header="Import Basket" :style="{ width: '500px', maxWidth: '95vw' }">
+      <div class="export-dialog-body">
+        <p class="dialog-hint">
+          Paste an exported basket JSON below.
+          {{ activeBasket ? `Items will be added to "${activeBasket.name}".` : 'A new basket will be created.' }}
+        </p>
+        <Textarea v-model="importText" autoResize style="width: 100%; font-family: monospace; font-size: 0.8rem;" rows="5" placeholder='{"name":"...","items":[...]}' />
+        <div style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+          <Button label="Import" icon="pi pi-download" size="small" :disabled="!importText.trim() || importBusy" :loading="importBusy" @click="doImport" />
+          <span v-if="importResult" class="import-result">{{ importResult }}</span>
+        </div>
+      </div>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
+.sort-header {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text-secondary);
+  transition: color 0.15s;
+}
+
+.sort-header i {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  transition: color 0.15s;
+}
+
+.sort-header:hover {
+  color: var(--text);
+}
+
+.sort-header:hover i {
+  color: var(--text-muted);
+}
+
+.sort-header.active {
+  color: var(--accent);
+}
+
+.sort-header.active i {
+  color: var(--accent);
+}
+
 .basket-create {
   display: flex;
   gap: 0.5rem;
@@ -488,6 +683,21 @@ onMounted(loadBaskets)
   margin: 0 0 0.75rem 0;
   font-size: 0.85rem;
   color: var(--text-muted);
+}
+
+.export-dialog-body {
+  padding: 0.25rem 0;
+}
+
+.dialog-hint {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.import-result {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
 }
 
 .share-user-row {

@@ -2,10 +2,13 @@
 import { ref, onMounted, computed } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import Dialog from 'primevue/dialog'
+import Select from 'primevue/select'
 import {
   listSharedLists, createSharedList, getSharedList, deleteSharedList,
-  removeFromSharedList,
-  type SharedList,
+  removeFromSharedList, importBasketToSharedList,
+  listBaskets,
+  type SharedList, type Basket,
 } from '../api/client'
 
 const lists = ref<SharedList[]>([])
@@ -13,6 +16,13 @@ const activeList = ref<SharedList | null>(null)
 const newListName = ref('')
 const loading = ref(false)
 const copied = ref(false)
+
+// Import basket state
+const importDialogVisible = ref(false)
+const availableBaskets = ref<Basket[]>([])
+const selectedBasketId = ref<number | null>(null)
+const importBusy = ref(false)
+const importResult = ref<string | null>(null)
 
 async function loadLists() {
   lists.value = await listSharedLists()
@@ -66,6 +76,44 @@ function openPublicUrl() {
   window.open(getPublicUrl(), '_blank')
 }
 
+async function openImportDialog() {
+  if (!activeList.value) return
+  importResult.value = null
+  selectedBasketId.value = null
+  try {
+    availableBaskets.value = await listBaskets()
+  } catch {
+    availableBaskets.value = []
+  }
+  importDialogVisible.value = true
+}
+
+const basketOptions = computed(() =>
+  availableBaskets.value
+    .filter(b => b.itemCount > 0)
+    .map(b => ({ label: `${b.name} (${b.itemCount} items)`, value: b.id }))
+)
+
+async function doImportBasket() {
+  if (!activeList.value || !selectedBasketId.value) return
+  importBusy.value = true
+  importResult.value = null
+  try {
+    const res = await importBasketToSharedList(activeList.value.id, selectedBasketId.value)
+    if (res.imported === 0) {
+      importResult.value = 'No changes — all items already up to date.'
+    } else {
+      importResult.value = `${res.imported} item(s) imported or updated.`
+    }
+    await selectList(activeList.value.id)
+    await loadLists()
+  } catch (e: any) {
+    importResult.value = `Error: ${e?.message || String(e)}`
+  } finally {
+    importBusy.value = false
+  }
+}
+
 const emit = defineEmits<{ 'update:activeId': [id: number | undefined] }>()
 
 const activeItems = computed(() => activeList.value?.items || [])
@@ -116,8 +164,34 @@ onMounted(loadLists)
         <code class="link-url">{{ getPublicUrl() }}</code>
         <Button :label="copied ? 'Copied!' : 'Copy'" :icon="copied ? 'pi pi-check' : 'pi pi-copy'" size="small" severity="secondary" @click="copyLink" />
         <Button label="Open" icon="pi pi-external-link" size="small" severity="secondary" @click="openPublicUrl" />
+        <Button label="Import Basket" icon="pi pi-shopping-cart" size="small" severity="secondary" @click="openImportDialog" />
       </div>
     </div>
+
+    <!-- Import basket dialog -->
+    <Dialog v-model:visible="importDialogVisible" modal header="Import Basket to List" :style="{ width: '400px', maxWidth: '95vw' }">
+      <div class="import-dialog-body">
+        <p class="import-hint">
+          Import items from a basket into <strong>{{ activeList?.name }}</strong>.
+          Existing items will have their quantity updated. Items with no changes are skipped.
+        </p>
+        <div v-if="basketOptions.length === 0" class="empty-state">No baskets with items available.</div>
+        <template v-else>
+          <Select
+            v-model="selectedBasketId"
+            :options="basketOptions"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Select a basket..."
+            style="width: 100%;"
+          />
+          <div style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+            <Button label="Import" icon="pi pi-download" size="small" :disabled="!selectedBasketId || importBusy" :loading="importBusy" @click="doImportBasket" />
+            <span v-if="importResult" class="import-result">{{ importResult }}</span>
+          </div>
+        </template>
+      </div>
+    </Dialog>
 
     <!-- Items table -->
     <div v-if="activeList && activeItems.length > 0">
@@ -130,6 +204,8 @@ onMounted(loadLists)
             <th>ABV%</th>
             <th>Volume</th>
             <th>Price</th>
+            <th>Qty</th>
+            <th style="text-align: right;">Subtotal</th>
             <th>Country</th>
             <th></th>
           </tr>
@@ -148,12 +224,21 @@ onMounted(loadLists)
             <td>{{ item.alcoholPercentage }}%</td>
             <td>{{ item.volumeText }}</td>
             <td>{{ item.price }} kr</td>
+            <td>{{ item.quantity }}</td>
+            <td style="text-align: right; font-weight: 600;">{{ (item.price * item.quantity).toFixed(1) }} kr</td>
             <td class="text-muted">{{ item.country }}</td>
             <td>
               <i class="pi pi-times action-icon red" @click="removeItem(item.productId)" title="Remove"></i>
             </td>
           </tr>
         </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="7" style="font-weight: 700;">Total</td>
+            <td style="text-align: right; font-weight: 700;">{{ activeItems.reduce((s, i) => s + i.price * i.quantity, 0).toFixed(1) }} kr</td>
+            <td colspan="2"></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
 
@@ -257,6 +342,21 @@ onMounted(loadLists)
 
 .action-icon.red:hover {
   color: var(--danger);
+}
+
+.import-dialog-body {
+  padding: 0.25rem 0;
+}
+
+.import-hint {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.import-result {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
 }
 
 .text-muted { color: var(--text-muted); }

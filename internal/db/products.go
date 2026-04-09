@@ -17,15 +17,17 @@ type ListFilter struct {
 	Category  string
 	MinPrice  *float64
 	MaxPrice  *float64
+	MinAbv    *float64
+	MaxAbv    *float64
 	SortBy    string
 	SortDir   string
 	Page      int
 	PageSize  int
 	Name      string
 	Producer  string
-	Country   string
-	Packaging string
-	Volume    string
+	Countries []string
+	Packagings []string
+	Volumes   []string
 }
 
 func (db *DB) UpsertProducts(products []systembolaget.Product) error {
@@ -41,8 +43,8 @@ func (db *DB) UpsertProducts(products []systembolaget.Product) error {
 			producer_name, price, volume, volume_text, alcohol_pct,
 			country, category_level1, category_level2, assortment_text,
 			taste, usage, is_organic, is_news, packaging_level1,
-			vintage, image_url, synced_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			assortment, product_launch_date, vintage, image_url, synced_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	`)
 	if err != nil {
 		return err
@@ -55,7 +57,7 @@ func (db *DB) UpsertProducts(products []systembolaget.Product) error {
 			p.ProducerName, p.Price, p.Volume, p.VolumeText, p.AlcoholPercent,
 			p.Country, p.CategoryLevel1, p.CategoryLevel2, p.AssortmentText,
 			p.Taste, p.Usage, p.IsOrganic, p.IsNews, p.PackagingLevel1,
-			p.Vintage, p.ImageURL,
+			p.Assortment, p.ProductLaunchDate, p.Vintage, p.ImageURL,
 		)
 		if err != nil {
 			return fmt.Errorf("upsert product %s: %w", p.ProductID, err)
@@ -101,17 +103,37 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 		where = append(where, "p.producer_name LIKE ?")
 		args = append(args, "%"+f.Producer+"%")
 	}
-	if f.Country != "" {
-		where = append(where, "p.country LIKE ?")
-		args = append(args, "%"+f.Country+"%")
+	if f.MinAbv != nil {
+		where = append(where, "p.alcohol_pct >= ?")
+		args = append(args, *f.MinAbv)
 	}
-	if f.Packaging != "" {
-		where = append(where, "p.packaging_level1 LIKE ?")
-		args = append(args, "%"+f.Packaging+"%")
+	if f.MaxAbv != nil {
+		where = append(where, "p.alcohol_pct <= ?")
+		args = append(args, *f.MaxAbv)
 	}
-	if f.Volume != "" {
-		where = append(where, "p.volume_text LIKE ?")
-		args = append(args, "%"+f.Volume+"%")
+	if len(f.Countries) > 0 {
+		placeholders := make([]string, len(f.Countries))
+		for i, v := range f.Countries {
+			placeholders[i] = "?"
+			args = append(args, v)
+		}
+		where = append(where, "p.country IN ("+strings.Join(placeholders, ",")+")")
+	}
+	if len(f.Packagings) > 0 {
+		placeholders := make([]string, len(f.Packagings))
+		for i, v := range f.Packagings {
+			placeholders[i] = "?"
+			args = append(args, v)
+		}
+		where = append(where, "p.packaging_level1 IN ("+strings.Join(placeholders, ",")+")")
+	}
+	if len(f.Volumes) > 0 {
+		placeholders := make([]string, len(f.Volumes))
+		for i, v := range f.Volumes {
+			placeholders[i] = "?"
+			args = append(args, v)
+		}
+		where = append(where, "p.volume_text IN ("+strings.Join(placeholders, ",")+")")
 	}
 
 	whereClause := ""
@@ -156,7 +178,7 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 			p.producer_name, p.price, p.volume, p.volume_text, p.alcohol_pct,
 			p.country, p.category_level1, p.category_level2, p.assortment_text,
 			p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
-			p.vintage, p.image_url, n.note
+			p.assortment, p.vintage, p.image_url, n.note
 		FROM products p
 		LEFT JOIN notes n ON p.product_id = n.product_id
 		%s
@@ -179,7 +201,7 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 			&p.ProducerName, &p.Price, &p.Volume, &p.VolumeText, &p.AlcoholPercent,
 			&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &p.AssortmentText,
 			&p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
-			&p.Vintage, &p.ImageURL, &p.Note,
+			&p.Assortment, &p.Vintage, &p.ImageURL, &p.Note,
 		)
 		if err != nil {
 			return nil, 0, err
@@ -197,7 +219,7 @@ func (db *DB) GetProduct(id string) (*ProductWithNote, error) {
 			p.producer_name, p.price, p.volume, p.volume_text, p.alcohol_pct,
 			p.country, p.category_level1, p.category_level2, p.assortment_text,
 			p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
-			p.vintage, p.image_url, n.note
+			p.assortment, p.vintage, p.image_url, n.note
 		FROM products p
 		LEFT JOIN notes n ON p.product_id = n.product_id
 		WHERE p.product_id = ?
@@ -206,7 +228,7 @@ func (db *DB) GetProduct(id string) (*ProductWithNote, error) {
 		&p.ProducerName, &p.Price, &p.Volume, &p.VolumeText, &p.AlcoholPercent,
 		&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &p.AssortmentText,
 		&p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
-		&p.Vintage, &p.ImageURL, &p.Note,
+		&p.Assortment, &p.Vintage, &p.ImageURL, &p.Note,
 	)
 	if err != nil {
 		return nil, err
@@ -241,4 +263,60 @@ func (db *DB) DistinctValues(column string) ([]string, error) {
 		vals = append(vals, v)
 	}
 	return vals, rows.Err()
+}
+
+func (db *DB) DeleteProduct(id string) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, table := range []string{
+		"notes", "comments", "basket_items", "shared_list_items",
+		"event_beers", "roll_pool",
+	} {
+		if _, err := tx.Exec("DELETE FROM "+table+" WHERE product_id = ?", id); err != nil {
+			return fmt.Errorf("clearing %s: %w", table, err)
+		}
+	}
+
+	res, err := tx.Exec("DELETE FROM products WHERE product_id = ?", id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("product not found")
+	}
+	return tx.Commit()
+}
+
+func (db *DB) DeleteAllProducts() (int64, error) {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// Delete from all tables that reference products
+	for _, table := range []string{
+		"notes", "comments", "basket_items", "shared_list_items",
+		"event_beers", "roll_pool",
+	} {
+		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
+			return 0, fmt.Errorf("clearing %s: %w", table, err)
+		}
+	}
+
+	res, err := tx.Exec("DELETE FROM products")
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return n, nil
 }

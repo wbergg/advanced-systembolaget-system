@@ -86,13 +86,13 @@ onMounted(loadComments)
         <span v-if="product.isNews" class="badge-news" style="margin-left: 0.5rem">New</span>
       </p>
 
-      <div class="note-editor" style="max-width: 50%;">
+      <div class="note-editor" style="max-width: 85%;">
         <label class="section-label">Notes</label>
         <textarea v-model="note" placeholder="Add a personal note about this product..."></textarea>
         <Button label="Save note" icon="pi pi-save" :loading="saving" @click="saveNote" size="small" style="margin-top: 0.4rem" />
       </div>
 
-      <div class="comments-section" style="max-width: 50%;">
+      <div class="comments-section" style="max-width: 85%;">
         <label class="section-label">Comments</label>
         <div class="comment-input">
           <textarea v-model="newComment" placeholder="Write a comment..." rows="2"></textarea>

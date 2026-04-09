@@ -215,6 +215,86 @@ func (db *DB) RemoveFromSharedList(listID int, productID string) error {
 	return nil
 }
 
+// ImportBasketToSharedList imports basket items into a shared list.
+// If an item already exists with the same quantity, it is skipped.
+// If it exists with a different quantity, the quantity is updated.
+// Returns the number of items imported or updated.
+func (db *DB) ImportBasketToSharedList(listID, basketID, userID int) (int, error) {
+	// Verify the user owns the shared list
+	var listOwner int
+	err := db.conn.QueryRow("SELECT user_id FROM shared_lists WHERE id = ?", listID).Scan(&listOwner)
+	if err != nil {
+		return 0, fmt.Errorf("shared list not found")
+	}
+	if listOwner != userID {
+		return 0, fmt.Errorf("not your shared list")
+	}
+
+	// Verify the user can access the basket
+	_, err = db.canAccessBasket(basketID, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Get basket items
+	rows, err := db.conn.Query(
+		"SELECT product_id, quantity FROM basket_items WHERE basket_id = ?", basketID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type basketEntry struct {
+		productID string
+		quantity  int
+	}
+	var entries []basketEntry
+	for rows.Next() {
+		var e basketEntry
+		if err := rows.Scan(&e.productID, &e.quantity); err != nil {
+			return 0, err
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	now := time.Now().Format(time.RFC3339)
+	changed := 0
+	for _, e := range entries {
+		// Check if item already exists with the same quantity
+		var existingQty int
+		err := db.conn.QueryRow(
+			"SELECT quantity FROM shared_list_items WHERE list_id = ? AND product_id = ?",
+			listID, e.productID).Scan(&existingQty)
+		if err == sql.ErrNoRows {
+			// Insert new item
+			_, err = db.conn.Exec(
+				"INSERT INTO shared_list_items (list_id, product_id, quantity, added_at) VALUES (?, ?, ?, ?)",
+				listID, e.productID, e.quantity, now)
+			if err != nil {
+				return 0, err
+			}
+			changed++
+		} else if err != nil {
+			return 0, err
+		} else if existingQty != e.quantity {
+			// Update quantity only if different
+			_, err = db.conn.Exec(
+				"UPDATE shared_list_items SET quantity = ? WHERE list_id = ? AND product_id = ?",
+				e.quantity, listID, e.productID)
+			if err != nil {
+				return 0, err
+			}
+			changed++
+		}
+		// else: same quantity, skip
+	}
+
+	return changed, nil
+}
+
 func (db *DB) DeleteSharedList(id, userID int) error {
 	res, err := db.conn.Exec(
 		`DELETE FROM shared_lists WHERE id = ? AND user_id = ?`,

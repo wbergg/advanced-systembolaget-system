@@ -14,6 +14,7 @@ const filters = ref<Record<string, string>>({
   'pris-fran': '',
   land: '',
   q: '',
+  butik: '',
 })
 
 const syncing = ref(false)
@@ -81,6 +82,10 @@ async function doSync() {
         <div class="field">
           <label>Text search (q)</label>
           <InputText v-model="filters.q" placeholder="Free text..." />
+        </div>
+        <div class="field">
+          <label>Store ID (butik)</label>
+          <InputText v-model="filters.butik" placeholder="e.g. 0176" />
         </div>
       </div>
 

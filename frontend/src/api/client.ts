@@ -74,6 +74,17 @@ export async function deleteUser(id: number): Promise<void> {
   if (!res.ok) throw new Error(await res.text())
 }
 
+export async function deleteProduct(id: string): Promise<void> {
+  const res = await authFetch(`/api/admin/products/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export async function deleteAllProducts(): Promise<{ deleted: number }> {
+  const res = await authFetch('/api/admin/products', { method: 'DELETE' })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 // Products
 
 export interface Product {
@@ -95,6 +106,7 @@ export interface Product {
   isOrganic: boolean
   isNews: boolean
   packagingLevel1: string
+  assortment: string
   vintage: string | null
   imageUrl: string
   note: string | null
@@ -112,15 +124,17 @@ export interface ListParams {
   category?: string
   minPrice?: number
   maxPrice?: number
+  minAbv?: number
+  maxAbv?: number
   sortBy?: string
   sortDir?: string
   page?: number
   pageSize?: number
   name?: string
   producer?: string
-  country?: string
-  packaging?: string
-  volume?: string
+  country?: string[]
+  packaging?: string[]
+  volume?: string[]
 }
 
 export async function getProducts(params: ListParams): Promise<ProductsResponse> {
@@ -129,15 +143,17 @@ export async function getProducts(params: ListParams): Promise<ProductsResponse>
   if (params.category) q.set('category', params.category)
   if (params.minPrice != null) q.set('minPrice', String(params.minPrice))
   if (params.maxPrice != null) q.set('maxPrice', String(params.maxPrice))
+  if (params.minAbv != null) q.set('minAbv', String(params.minAbv))
+  if (params.maxAbv != null) q.set('maxAbv', String(params.maxAbv))
   if (params.sortBy) q.set('sortBy', params.sortBy)
   if (params.sortDir) q.set('sortDir', params.sortDir)
   if (params.page) q.set('page', String(params.page))
   if (params.pageSize) q.set('pageSize', String(params.pageSize))
   if (params.name) q.set('name', params.name)
   if (params.producer) q.set('producer', params.producer)
-  if (params.country) q.set('country', params.country)
-  if (params.packaging) q.set('packaging', params.packaging)
-  if (params.volume) q.set('volume', params.volume)
+  if (params.country && params.country.length > 0) q.set('country', params.country.join(','))
+  if (params.packaging && params.packaging.length > 0) q.set('packaging', params.packaging.join(','))
+  if (params.volume && params.volume.length > 0) q.set('volume', params.volume.join(','))
 
   const res = await authFetch(`/api/products?${q}`)
   if (!res.ok) throw new Error(await res.text())
@@ -269,6 +285,8 @@ export interface BasketItem {
   price: number
   volumeText: string
   alcoholPercentage: number
+  country: string
+  packagingLevel1: string
   imageUrl: string
   quantity: number
   addedBy: string
@@ -691,6 +709,16 @@ export async function addToSharedList(listId: number, productId: string, quantit
 export async function removeFromSharedList(listId: number, productId: string): Promise<void> {
   const res = await authFetch(`/api/shared-lists/${listId}/items/${productId}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(await res.text())
+}
+
+export async function importBasketToSharedList(listId: number, basketId: number): Promise<{ imported: number }> {
+  const res = await authFetch(`/api/shared-lists/${listId}/import-basket`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ basketId }),
+  })
+  if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to import basket') }
+  return res.json()
 }
 
 // Public (no auth) - for shared list page

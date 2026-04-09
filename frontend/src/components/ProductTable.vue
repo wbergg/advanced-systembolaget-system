@@ -4,10 +4,13 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
+import MultiSelect from 'primevue/multiselect'
 import ProductDetail from './ProductDetail.vue'
 import Button from 'primevue/button'
-import { getProducts, getDistinctValues, addToBasket, createBasket, addToSharedList, type Product, type ListParams } from '../api/client'
+import { getProducts, getDistinctValues, addToBasket, createBasket, addToSharedList, deleteProduct, type Product, type ListParams } from '../api/client'
+import { useAuthStore } from '../stores/auth'
 
+const authStore = useAuthStore()
 const props = defineProps<{ activeBasketId?: number; activeSharedListId?: number }>()
 const emit = defineEmits<{ basketChanged: []; newBasket: [id: number]; sharedListChanged: [] }>()
 
@@ -27,9 +30,11 @@ const pageSize = ref(50)
 
 const nameFilter = ref('')
 const producerFilter = ref('')
-const countryFilter = ref('')
-const packagingFilter = ref('')
-const volumeFilter = ref('')
+const countryFilter = ref<string[]>([])
+const packagingFilter = ref<string[]>([])
+const volumeFilter = ref<string[]>([])
+const minAbv = ref<number | undefined>()
+const maxAbv = ref<number | undefined>()
 
 const countryOptions = ref<string[]>([])
 const packagingOptions = ref<string[]>([])
@@ -96,15 +101,17 @@ async function loadData() {
       category: category.value || undefined,
       minPrice: minPrice.value,
       maxPrice: maxPrice.value,
+      minAbv: minAbv.value,
+      maxAbv: maxAbv.value,
       sortBy: sortField.value,
       sortDir: sortDir.value,
       page: page.value,
       pageSize: pageSize.value,
       name: nameFilter.value || undefined,
       producer: producerFilter.value || undefined,
-      country: countryFilter.value || undefined,
-      packaging: packagingFilter.value || undefined,
-      volume: volumeFilter.value || undefined,
+      country: countryFilter.value.length > 0 ? countryFilter.value : undefined,
+      packaging: packagingFilter.value.length > 0 ? packagingFilter.value : undefined,
+      volume: volumeFilter.value.length > 0 ? volumeFilter.value : undefined,
     }
     const res = await getProducts(params)
     products.value = res.products || []
@@ -131,7 +138,7 @@ watch([search, nameFilter, producerFilter], () => {
   }, 300)
 })
 
-watch([category, minPrice, maxPrice, countryFilter, packagingFilter, volumeFilter], () => {
+watch([category, minPrice, maxPrice, minAbv, maxAbv, countryFilter, packagingFilter, volumeFilter], () => {
   page.value = 1
   loadData()
 })
@@ -178,16 +185,28 @@ async function doAddToSharedList(productId: string) {
   }
 }
 
+async function doDeleteProduct(productId: string) {
+  if (!confirm('Delete this product from the database?')) return
+  try {
+    await deleteProduct(productId)
+    loadData()
+  } catch (e: any) {
+    showError(e?.message || String(e))
+  }
+}
+
 function resetFilters() {
   search.value = ''
   category.value = ''
   minPrice.value = undefined
   maxPrice.value = undefined
+  minAbv.value = undefined
+  maxAbv.value = undefined
   nameFilter.value = ''
   producerFilter.value = ''
-  countryFilter.value = ''
-  packagingFilter.value = ''
-  volumeFilter.value = ''
+  countryFilter.value = []
+  packagingFilter.value = []
+  volumeFilter.value = []
   sortField.value = 'name'
   sortDir.value = 'asc'
   page.value = 1
@@ -196,6 +215,7 @@ function resetFilters() {
 
 function reload() {
   loadData()
+  loadFilterOptions()
 }
 
 defineExpose({ reload })
@@ -227,15 +247,15 @@ onMounted(() => {
       </div>
       <div class="filter-group">
         <label>Country:</label>
-        <Select v-model="countryFilter" :options="[{ label: 'All', value: '' }, ...countryOptions.map(v => ({ label: v, value: v }))]" optionLabel="label" optionValue="value" />
+        <MultiSelect v-model="countryFilter" :options="countryOptions.map(v => ({ label: v, value: v }))" optionLabel="label" optionValue="value" placeholder="All" :maxSelectedLabels="2" />
       </div>
       <div class="filter-group">
         <label>Volume:</label>
-        <Select v-model="volumeFilter" :options="[{ label: 'All', value: '' }, ...volumeOptions.map(v => ({ label: v, value: v }))]" optionLabel="label" optionValue="value" />
+        <MultiSelect v-model="volumeFilter" :options="volumeOptions.map(v => ({ label: v, value: v }))" optionLabel="label" optionValue="value" placeholder="All" :maxSelectedLabels="2" />
       </div>
       <div class="filter-group">
         <label>Packaging:</label>
-        <Select v-model="packagingFilter" :options="[{ label: 'All', value: '' }, ...packagingOptions.map(v => ({ label: v, value: v }))]" optionLabel="label" optionValue="value" />
+        <MultiSelect v-model="packagingFilter" :options="packagingOptions.map(v => ({ label: v, value: v }))" optionLabel="label" optionValue="value" placeholder="All" :maxSelectedLabels="2" />
       </div>
       <div class="filter-group">
         <label>Min price:</label>
@@ -244,6 +264,14 @@ onMounted(() => {
       <div class="filter-group">
         <label>Max price:</label>
         <InputText :modelValue="maxPrice != null ? String(maxPrice) : ''" @update:modelValue="v => maxPrice = v ? Number(v) : undefined" placeholder="∞" />
+      </div>
+      <div class="filter-group">
+        <label>Min ABV%:</label>
+        <InputText :modelValue="minAbv != null ? String(minAbv) : ''" @update:modelValue="v => minAbv = v ? Number(v) : undefined" placeholder="0" />
+      </div>
+      <div class="filter-group">
+        <label>Max ABV%:</label>
+        <InputText :modelValue="maxAbv != null ? String(maxAbv) : ''" @update:modelValue="v => maxAbv = v ? Number(v) : undefined" placeholder="∞" />
       </div>
       <div class="filter-actions">
         <Button label="Reset Filters" severity="danger" size="small" @click="resetFilters" />
@@ -255,6 +283,8 @@ onMounted(() => {
       {{ errorMsg }}
       <i class="pi pi-times" style="cursor: pointer; margin-left: auto; font-size: 0.75rem;" @click="errorMsg = ''"></i>
     </div>
+
+    <div class="results-count">{{ totalRecords }} product{{ totalRecords === 1 ? '' : 's' }}</div>
 
     <DataTable
       :value="products"
@@ -336,7 +366,7 @@ onMounted(() => {
         </template>
       </Column>
       <Column field="packagingLevel1" style="width: 120px" header="Pkg" />
-      <Column header="" style="width: 90px">
+      <Column header="" :style="{ width: authStore.isAdmin ? '120px' : '90px' }">
         <template #body="{ data }">
           <div style="display: flex; gap: 0.25rem;">
             <Button icon="pi pi-cart-plus" severity="success" rounded size="small"
@@ -345,12 +375,17 @@ onMounted(() => {
             <Button icon="pi pi-list" severity="info" rounded size="small"
               title="Add to shared list"
               @click="doAddToSharedList(data.productId)" />
+            <Button v-if="authStore.isAdmin" icon="pi pi-trash" severity="danger" rounded size="small"
+              title="Delete product"
+              @click="doDeleteProduct(data.productId)" />
           </div>
         </template>
       </Column>
 
       <template #expansion="{ data }">
-        <ProductDetail :product="data" @updated="loadData" />
+        <div style="max-width: 700px;">
+          <ProductDetail :product="data" @updated="loadData" />
+        </div>
       </template>
 
       <template #empty>
@@ -393,6 +428,12 @@ onMounted(() => {
 
 .sort-header.active i {
   color: var(--accent);
+}
+
+.results-count {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
 }
 
 .error-banner {
