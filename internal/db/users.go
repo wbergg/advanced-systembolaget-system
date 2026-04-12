@@ -112,12 +112,12 @@ func (db *DB) SeedAdmin(username, password string) error {
 	if err != nil {
 		return fmt.Errorf("seed admin count: %w", err)
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("seed admin hash: %w", err)
-	}
 
 	if count == 0 {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("seed admin hash: %w", err)
+		}
 		_, err = db.conn.Exec(
 			"INSERT INTO users (username, password, role) VALUES (?, ?, 'admin')",
 			username, string(hash),

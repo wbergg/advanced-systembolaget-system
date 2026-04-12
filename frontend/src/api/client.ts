@@ -107,6 +107,7 @@ export interface Product {
   isNews: boolean
   packagingLevel1: string
   assortment: string
+  restrictedParcelQuantity: number
   vintage: string | null
   imageUrl: string
   note: string | null
@@ -275,128 +276,11 @@ export async function deleteComment(id: number): Promise<void> {
   if (!res.ok) throw new Error(await res.text())
 }
 
-// Baskets
-
-export interface BasketItem {
-  productId: string
-  productNameBold: string
-  productNameThin: string | null
-  producerName: string
-  price: number
-  volumeText: string
-  alcoholPercentage: number
-  country: string
-  packagingLevel1: string
-  imageUrl: string
-  quantity: number
-  addedBy: string
-}
+// Users
 
 export interface ShareUser {
   userId: number
   username: string
-}
-
-export interface Basket {
-  id: number
-  name: string
-  ownerId: number
-  ownerName: string
-  shared: boolean
-  locked: boolean
-  sharedWith?: ShareUser[]
-  createdAt: string
-  items?: BasketItem[]
-  itemCount: number
-  total: number
-}
-
-export async function listBaskets(): Promise<Basket[]> {
-  const res = await authFetch('/api/baskets')
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-export async function createBasket(name: string): Promise<Basket> {
-  const res = await authFetch('/api/baskets', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-export async function getBasket(id: number): Promise<Basket> {
-  const res = await authFetch(`/api/baskets/${id}`)
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-export async function renameBasket(id: number, name: string): Promise<void> {
-  const res = await authFetch(`/api/baskets/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-}
-
-export async function deleteBasket(id: number): Promise<void> {
-  const res = await authFetch(`/api/baskets/${id}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(await res.text())
-}
-
-export async function addToBasket(basketId: number, productId: string, quantity = 1): Promise<void> {
-  const res = await authFetch(`/api/baskets/${basketId}/items`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ productId, quantity }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-}
-
-export async function updateBasketItemQty(basketId: number, productId: string, quantity: number): Promise<void> {
-  const res = await authFetch(`/api/baskets/${basketId}/items/${productId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ quantity }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-}
-
-export async function removeFromBasket(basketId: number, productId: string): Promise<void> {
-  const res = await authFetch(`/api/baskets/${basketId}/items/${productId}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(await res.text())
-}
-
-export async function setBasketLocked(basketId: number, locked: boolean): Promise<void> {
-  const res = await authFetch(`/api/baskets/${basketId}/lock`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ locked }),
-  })
-  if (!res.ok) {
-    const data = await res.json()
-    throw new Error(data.error || 'Failed to update lock')
-  }
-}
-
-export async function shareBasket(basketId: number, userId: number): Promise<void> {
-  const res = await authFetch(`/api/baskets/${basketId}/share`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId }),
-  })
-  if (!res.ok) {
-    const data = await res.json()
-    throw new Error(data.error || 'Failed to share basket')
-  }
-}
-
-export async function unshareBasket(basketId: number, userId: number): Promise<void> {
-  const res = await authFetch(`/api/baskets/${basketId}/share/${userId}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(await res.text())
 }
 
 export async function listAllUsers(): Promise<ShareUser[]> {
@@ -436,7 +320,6 @@ export interface Event {
   ownerName: string
   locked: boolean
   type: 'tasting' | 'roll'
-  basketId: number | null
   hidden: boolean
   createdAt: string
   attendees?: EventAttendee[]
@@ -452,11 +335,11 @@ export async function listEvents(): Promise<Event[]> {
   return res.json()
 }
 
-export async function createEvent(name: string, description: string, eventDate: string, type: string = 'tasting', basketId?: number): Promise<Event> {
+export async function createEvent(name: string, description: string, eventDate: string, type: string = 'tasting'): Promise<Event> {
   const res = await authFetch('/api/events', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description, eventDate, type, basketId }),
+    body: JSON.stringify({ name, description, eventDate, type }),
   })
   if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to create event') }
   return res.json()
@@ -505,13 +388,13 @@ export async function uninviteFromEvent(eventId: number, userId: number): Promis
   if (!res.ok) throw new Error(await res.text())
 }
 
-export async function importBasketToEvent(eventId: number, basketId: number): Promise<void> {
-  const res = await authFetch(`/api/events/${eventId}/import-basket`, {
+export async function importSharedListToEvent(eventId: number, listId: number): Promise<void> {
+  const res = await authFetch(`/api/events/${eventId}/import-list`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ basketId }),
+    body: JSON.stringify({ listId }),
   })
-  if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to import basket') }
+  if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to import list') }
 }
 
 export async function addBeerToEvent(eventId: number, productId: string): Promise<void> {
@@ -656,6 +539,7 @@ export interface SharedListItem {
   usage: string
   isOrganic: boolean
   quantity: number
+  addedBy: string
   addedAt: string
 }
 
@@ -665,7 +549,11 @@ export interface SharedList {
   name: string
   userId: number
   ownerName: string
+  shared: boolean
+  locked: boolean
+  sharedWith?: ShareUser[]
   itemCount: number
+  total: number
   createdAt: string
   items?: SharedListItem[]
 }
@@ -711,14 +599,54 @@ export async function removeFromSharedList(listId: number, productId: string): P
   if (!res.ok) throw new Error(await res.text())
 }
 
-export async function importBasketToSharedList(listId: number, basketId: number): Promise<{ imported: number }> {
-  const res = await authFetch(`/api/shared-lists/${listId}/import-basket`, {
+export async function updateSharedListItemQty(listId: number, productId: string, quantity: number): Promise<void> {
+  const res = await authFetch(`/api/shared-lists/${listId}/items/${productId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quantity }),
+  })
+  if (!res.ok) {
+    const d = await res.json()
+    throw new Error(d.error || 'Failed to update quantity')
+  }
+}
+
+export async function renameSharedList(id: number, name: string): Promise<void> {
+  const res = await authFetch(`/api/shared-lists/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export async function setSharedListLocked(listId: number, locked: boolean): Promise<void> {
+  const res = await authFetch(`/api/shared-lists/${listId}/lock`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ locked }),
+  })
+  if (!res.ok) {
+    const d = await res.json()
+    throw new Error(d.error || 'Failed to update lock')
+  }
+}
+
+export async function shareSharedList(listId: number, userId: number): Promise<void> {
+  const res = await authFetch(`/api/shared-lists/${listId}/share`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ basketId }),
+    body: JSON.stringify({ userId }),
   })
-  if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to import basket') }
-  return res.json()
+  if (!res.ok) {
+    const data = await res.json()
+    throw new Error(data.error || 'Failed to share list')
+  }
+}
+
+export async function unshareSharedList(listId: number, userId: number): Promise<void> {
+  const res = await authFetch(`/api/shared-lists/${listId}/share/${userId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await res.text())
 }
 
 // Public (no auth) - for shared list page

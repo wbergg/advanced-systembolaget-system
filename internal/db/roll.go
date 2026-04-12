@@ -66,7 +66,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 
 	// Total + remaining counts
 	if err := db.conn.QueryRow(`
-		SELECT COUNT(*), SUM(CASE WHEN consumed = 0 THEN 1 ELSE 0 END)
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN consumed = 0 THEN 1 ELSE 0 END), 0)
 		FROM roll_pool WHERE event_id = ?
 	`, eventID).Scan(&state.TotalCount, &state.PoolCount); err != nil {
 		return nil, err
@@ -323,15 +323,19 @@ func (db *DB) VetoRoll(eventID, turnID int) error {
 
 	// Check user hasn't already used veto
 	var vetoCount int
-	tx.QueryRow("SELECT COUNT(*) FROM roll_turns WHERE event_id = ? AND user_id = ? AND status = 'vetoed'",
-		eventID, userID).Scan(&vetoCount)
+	if err := tx.QueryRow("SELECT COUNT(*) FROM roll_turns WHERE event_id = ? AND user_id = ? AND status = 'vetoed'",
+		eventID, userID).Scan(&vetoCount); err != nil {
+		return fmt.Errorf("check veto count: %w", err)
+	}
 	if vetoCount > 0 {
 		return fmt.Errorf("veto already used")
 	}
 
 	// Check pool entry isn't already veto-immune
 	var poolVetoed bool
-	tx.QueryRow("SELECT vetoed FROM roll_pool WHERE id = ?", poolID).Scan(&poolVetoed)
+	if err := tx.QueryRow("SELECT vetoed FROM roll_pool WHERE id = ?", poolID).Scan(&poolVetoed); err != nil {
+		return fmt.Errorf("check pool veto: %w", err)
+	}
 	if poolVetoed {
 		return fmt.Errorf("this beer has already been vetoed and cannot be vetoed again")
 	}
@@ -407,6 +411,27 @@ func (db *DB) UndoConsumed(eventID, poolID int) error {
 	}
 
 	return tx.Commit()
+}
+
+func (db *DB) ImportSharedListToRollPool(eventID, listID, userID int, isAdmin bool) error {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	if err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if ownerID != userID && !isAdmin {
+		return fmt.Errorf("only the owner or admin can import lists")
+	}
+	_, err = db.canAccessSharedList(listID, userID)
+	if err != nil {
+		return err
+	}
+	_, err = db.conn.Exec(`
+		INSERT INTO roll_pool (event_id, product_id)
+		SELECT ?, product_id FROM shared_list_items WHERE list_id = ?
+		AND product_id NOT IN (SELECT product_id FROM roll_pool WHERE event_id = ?)
+	`, eventID, listID, eventID)
+	return err
 }
 
 func (db *DB) ResetRoll(eventID int) error {

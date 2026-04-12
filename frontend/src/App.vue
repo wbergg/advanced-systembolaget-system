@@ -2,7 +2,6 @@
 import ProductTable from './components/ProductTable.vue'
 import SyncPanel from './components/SyncPanel.vue'
 import ApiKeyStatus from './components/ApiKeyStatus.vue'
-import BasketPanel from './components/BasketPanel.vue'
 import EventsPage from './components/EventsPage.vue'
 import SharedListsPage from './components/SharedListsPage.vue'
 import SharedListView from './components/SharedListView.vue'
@@ -23,15 +22,12 @@ if (pathMatch) {
 }
 
 const showSync = ref(false)
-const showBaskets = ref(false)
 const showEvents = ref(false)
 const showLists = ref(false)
 const showAdmin = ref(false)
 const showSettings = ref(false)
 const tableRef = ref<InstanceType<typeof ProductTable>>()
-const basketRef = ref<InstanceType<typeof BasketPanel>>()
 const sharedListRef = ref<InstanceType<typeof SharedListsPage>>()
-const activeBasketId = ref<number | undefined>()
 const activeSharedListId = ref<number | undefined>()
 
 // Impersonate dropdown
@@ -94,22 +90,7 @@ onUnmounted(() => {
 function onSynced() {
   showSync.value = false
   tableRef.value?.reload()
-  basketRef.value?.refreshActive()
   sharedListRef.value?.refreshActive()
-}
-
-function onActiveBasketChanged(id: number | undefined) {
-  activeBasketId.value = id
-}
-
-function onBasketChanged() {
-  basketRef.value?.refreshActive()
-}
-
-function onNewBasket(id: number) {
-  activeBasketId.value = id
-  showBaskets.value = true
-  basketRef.value?.refreshActive()
 }
 </script>
 
@@ -127,14 +108,11 @@ function onNewBasket(id: number) {
 
     <nav class="navbar">
       <h1>Systemet</h1>
-      <button class="nav-btn" :class="{ active: showBaskets && !showEvents && !showLists }" @click="showBaskets = !showBaskets; showEvents = false; showLists = false">
-        <i class="pi pi-shopping-cart"></i> Baskets
-      </button>
-      <button class="nav-btn" :class="{ active: showEvents }" @click="showEvents = !showEvents; if (showEvents) { showBaskets = false; showLists = false }">
-        <i class="pi pi-calendar"></i> Events
-      </button>
-      <button class="nav-btn" :class="{ active: showLists }" @click="showLists = !showLists; if (showLists) { showBaskets = false; showEvents = false }">
+      <button class="nav-btn" :class="{ active: showLists && !showEvents }" @click="showLists = !showLists; showEvents = false">
         <i class="pi pi-list"></i> Lists
+      </button>
+      <button class="nav-btn" :class="{ active: showEvents }" @click="showEvents = !showEvents; if (showEvents) { showLists = false }">
+        <i class="pi pi-calendar"></i> Events
       </button>
       <button class="nav-btn" :class="{ active: showSync }" @click="showSync = !showSync">
         <i class="pi pi-sync"></i> Sync
@@ -178,7 +156,7 @@ function onNewBasket(id: number) {
       </button>
     </nav>
 
-    <AdminPanel v-if="showAdmin" @close="showAdmin = false" @productsChanged="tableRef?.reload(); basketRef?.refreshActive(); sharedListRef?.refreshActive()" />
+    <AdminPanel v-if="showAdmin" @close="showAdmin = false" @productsChanged="tableRef?.reload(); sharedListRef?.refreshActive()" />
     <ChangePassword v-if="showSettings" @close="showSettings = false" />
     <SyncPanel v-if="showSync" @synced="onSynced" @cancel="showSync = false" />
 
@@ -187,8 +165,7 @@ function onNewBasket(id: number) {
     </template>
     <template v-else>
       <SharedListsPage v-if="showLists" ref="sharedListRef" @update:activeId="(id: number | undefined) => activeSharedListId = id" />
-      <BasketPanel v-if="showBaskets && !showLists" ref="basketRef" @update:activeId="onActiveBasketChanged" />
-      <ProductTable ref="tableRef" :activeBasketId="activeBasketId" :activeSharedListId="activeSharedListId" @basketChanged="onBasketChanged" @newBasket="onNewBasket" @sharedListChanged="sharedListRef?.refreshActive()" />
+      <ProductTable ref="tableRef" :activeSharedListId="activeSharedListId" @sharedListChanged="sharedListRef?.refreshActive()" />
     </template>
   </template>
 

@@ -107,17 +107,6 @@ func main() {
 			authed.POST("/key/refresh", refreshKey())
 			authed.GET("/key/status", keyStatus())
 
-			authed.GET("/baskets", listBaskets(database))
-			authed.POST("/baskets", createBasket(database))
-			authed.GET("/baskets/:id", getBasket(database))
-			authed.PATCH("/baskets/:id", renameBasket(database))
-			authed.DELETE("/baskets/:id", deleteBasket(database))
-			authed.POST("/baskets/:id/items", addToBasket(database))
-			authed.PATCH("/baskets/:id/items/:productId", updateBasketItem(database))
-			authed.DELETE("/baskets/:id/items/:productId", removeFromBasket(database))
-			authed.PATCH("/baskets/:id/lock", setBasketLocked(database))
-			authed.POST("/baskets/:id/share", shareBasket(database))
-			authed.DELETE("/baskets/:id/share/:userId", unshareBasket(database))
 			authed.GET("/users/list", listAllUsers(database))
 
 			authed.GET("/events", listEventsHandler(database))
@@ -128,7 +117,7 @@ func main() {
 			authed.PATCH("/events/:id/lock", setEventLockedHandler(database))
 			authed.POST("/events/:id/invite", inviteToEventHandler(database))
 			authed.DELETE("/events/:id/invite/:userId", uninviteFromEventHandler(database))
-			authed.POST("/events/:id/import-basket", importBasketHandler(database))
+			authed.POST("/events/:id/import-list", importSharedListHandler(database))
 			authed.POST("/events/:id/beers", addBeerToEventHandler(database))
 			authed.DELETE("/events/:id/beers/:beerId", removeBeerFromEventHandler(database))
 			authed.PUT("/events/:id/scores/:beerId", setScoreHandler(database))
@@ -148,10 +137,14 @@ func main() {
 			authed.GET("/shared-lists", listSharedLists(database))
 			authed.POST("/shared-lists", createSharedList(database))
 			authed.GET("/shared-lists/:id", getSharedList(database))
+			authed.PATCH("/shared-lists/:id", renameSharedList(database))
 			authed.DELETE("/shared-lists/:id", deleteSharedList(database))
 			authed.POST("/shared-lists/:id/items", addToSharedList(database))
+			authed.PATCH("/shared-lists/:id/items/:productId", updateSharedListItem(database))
 			authed.DELETE("/shared-lists/:id/items/:productId", removeFromSharedList(database))
-			authed.POST("/shared-lists/:id/import-basket", importBasketToSharedList(database))
+			authed.PATCH("/shared-lists/:id/lock", setSharedListLocked(database))
+			authed.POST("/shared-lists/:id/share", shareSharedList(database))
+			authed.DELETE("/shared-lists/:id/share/:userId", unshareSharedList(database))
 		}
 
 		// Public shared list endpoint (no auth)
@@ -439,241 +432,6 @@ func keyStatus() gin.HandlerFunc {
 	}
 }
 
-func listBaskets(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		baskets, err := database.ListBaskets(claims.UserID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if baskets == nil {
-			baskets = []db.Basket{}
-		}
-		c.JSON(http.StatusOK, baskets)
-	}
-}
-
-func createBasket(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		var body struct {
-			Name string `json:"name"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.Name == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
-			return
-		}
-		b, err := database.CreateBasket(body.Name, claims.UserID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusCreated, b)
-	}
-}
-
-func getBasket(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid basket id"})
-			return
-		}
-		b, err := database.GetBasket(id, claims.UserID)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "basket not found"})
-			return
-		}
-		c.JSON(http.StatusOK, b)
-	}
-}
-
-func renameBasket(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid basket id"})
-			return
-		}
-		var body struct {
-			Name string `json:"name"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.Name == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
-			return
-		}
-		if err := database.RenameBasket(id, body.Name, claims.UserID); err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	}
-}
-
-func deleteBasket(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid basket id"})
-			return
-		}
-		if err := database.DeleteBasket(id, claims.UserID); err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	}
-}
-
-func setBasketLocked(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid basket id"})
-			return
-		}
-		var body struct {
-			Locked bool `json:"locked"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
-			return
-		}
-		if err := database.SetBasketLocked(id, body.Locked, claims.UserID, claims.Role == "admin"); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	}
-}
-
-func addToBasket(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid basket id"})
-			return
-		}
-		var body struct {
-			ProductID string `json:"productId"`
-			Quantity  int    `json:"quantity"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.ProductID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "productId is required"})
-			return
-		}
-		if body.Quantity < 1 {
-			body.Quantity = 1
-		}
-		if err := database.AddToBasket(id, body.ProductID, body.Quantity, claims.UserID); err != nil {
-			status := http.StatusInternalServerError
-			if err.Error() == "basket is locked" {
-				status = http.StatusForbidden
-			}
-			c.JSON(status, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	}
-}
-
-func updateBasketItem(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid basket id"})
-			return
-		}
-		var body struct {
-			Quantity int `json:"quantity"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
-			return
-		}
-		if err := database.UpdateBasketItemQuantity(id, c.Param("productId"), body.Quantity, claims.UserID); err != nil {
-			status := http.StatusInternalServerError
-			if err.Error() == "basket is locked" {
-				status = http.StatusForbidden
-			}
-			c.JSON(status, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	}
-}
-
-func removeFromBasket(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid basket id"})
-			return
-		}
-		if err := database.RemoveFromBasket(id, c.Param("productId"), claims.UserID); err != nil {
-			status := http.StatusInternalServerError
-			if err.Error() == "basket is locked" {
-				status = http.StatusForbidden
-			}
-			c.JSON(status, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	}
-}
-
-func shareBasket(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid basket id"})
-			return
-		}
-		var body struct {
-			UserID int `json:"userId"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.UserID == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "userId is required"})
-			return
-		}
-		if err := database.ShareBasket(id, claims.UserID, body.UserID); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	}
-}
-
-func unshareBasket(database *db.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid basket id"})
-			return
-		}
-		targetUserID, err := strconv.Atoi(c.Param("userId"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
-			return
-		}
-		if err := database.UnshareBasket(id, claims.UserID, targetUserID); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	}
-}
-
 func listAllUsers(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		users, err := database.ListUsers()
@@ -719,7 +477,6 @@ func createEventHandler(database *db.DB) gin.HandlerFunc {
 			Description string `json:"description"`
 			EventDate   string `json:"eventDate"`
 			Type        string `json:"type"`
-			BasketID    *int   `json:"basketId"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil || body.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
@@ -732,7 +489,7 @@ func createEventHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "only admins can create roll events"})
 			return
 		}
-		ev, err := database.CreateEvent(body.Name, body.Description, body.EventDate, claims.UserID, body.Type, body.BasketID)
+		ev, err := database.CreateEvent(body.Name, body.Description, body.EventDate, claims.UserID, body.Type)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -866,7 +623,7 @@ func uninviteFromEventHandler(database *db.DB) gin.HandlerFunc {
 	}
 }
 
-func importBasketHandler(database *db.DB) gin.HandlerFunc {
+func importSharedListHandler(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims := auth.ClaimsFromContext(c)
 		id, err := strconv.Atoi(c.Param("id"))
@@ -875,15 +632,28 @@ func importBasketHandler(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		var body struct {
-			BasketID int `json:"basketId"`
+			ListID int `json:"listId"`
 		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.BasketID == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "basketId is required"})
+		if err := c.ShouldBindJSON(&body); err != nil || body.ListID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "listId is required"})
 			return
 		}
-		if err := database.ImportBasketToEvent(id, body.BasketID, claims.UserID, claims.Role == "admin"); err != nil {
+		// Check if this is a roll event
+		var eventType string
+		if err := database.GetEventType(id, &eventType); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if eventType == "roll" {
+			if err := database.ImportSharedListToRollPool(id, body.ListID, claims.UserID, claims.Role == "admin"); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		} else {
+			if err := database.ImportSharedListToEvent(id, body.ListID, claims.UserID, claims.Role == "admin"); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
@@ -1247,8 +1017,82 @@ func deleteSharedList(database *db.DB) gin.HandlerFunc {
 	}
 }
 
+func renameSharedList(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid list id"})
+			return
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+		if err := database.RenameSharedList(id, body.Name, claims.UserID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func setSharedListLocked(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid list id"})
+			return
+		}
+		var body struct {
+			Locked bool `json:"locked"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+		if err := database.SetSharedListLocked(id, body.Locked, claims.UserID, claims.Role == "admin"); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func updateSharedListItem(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid list id"})
+			return
+		}
+		var body struct {
+			Quantity int `json:"quantity"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+		if err := database.UpdateSharedListItemQuantity(id, c.Param("productId"), body.Quantity, claims.UserID); err != nil {
+			status := http.StatusInternalServerError
+			if err.Error() == "list is locked" {
+				status = http.StatusForbidden
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
 func addToSharedList(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid list id"})
@@ -1265,8 +1109,12 @@ func addToSharedList(database *db.DB) gin.HandlerFunc {
 		if body.Quantity < 1 {
 			body.Quantity = 1
 		}
-		if err := database.AddToSharedList(id, body.ProductID, body.Quantity); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if err := database.AddToSharedList(id, body.ProductID, body.Quantity, claims.UserID); err != nil {
+			status := http.StatusBadRequest
+			if err.Error() == "list is locked" {
+				status = http.StatusForbidden
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1275,20 +1123,25 @@ func addToSharedList(database *db.DB) gin.HandlerFunc {
 
 func removeFromSharedList(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid list id"})
 			return
 		}
-		if err := database.RemoveFromSharedList(id, c.Param("productId")); err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		if err := database.RemoveFromSharedList(id, c.Param("productId"), claims.UserID); err != nil {
+			status := http.StatusNotFound
+			if err.Error() == "list is locked" {
+				status = http.StatusForbidden
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 
-func importBasketToSharedList(database *db.DB) gin.HandlerFunc {
+func shareSharedList(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims := auth.ClaimsFromContext(c)
 		id, err := strconv.Atoi(c.Param("id"))
@@ -1297,18 +1150,38 @@ func importBasketToSharedList(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		var body struct {
-			BasketID int `json:"basketId"`
+			UserID int `json:"userId"`
 		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.BasketID == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "basketId is required"})
+		if err := c.ShouldBindJSON(&body); err != nil || body.UserID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "userId is required"})
 			return
 		}
-		changed, err := database.ImportBasketToSharedList(id, body.BasketID, claims.UserID)
-		if err != nil {
+		if err := database.ShareSharedList(id, claims.UserID, body.UserID); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"imported": changed})
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func unshareSharedList(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid list id"})
+			return
+		}
+		targetUserID, err := strconv.Atoi(c.Param("userId"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+			return
+		}
+		if err := database.UnshareSharedList(id, claims.UserID, targetUserID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 

@@ -2,10 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import Select from 'primevue/select'
 import EventDetail from './EventDetail.vue'
 import { useAuthStore } from '../stores/auth'
-import { listEvents, createEvent, deleteEvent, listBaskets, type Event, type Basket } from '../api/client'
+import { listEvents, createEvent, deleteEvent, type Event } from '../api/client'
 
 const authStore = useAuthStore()
 const events = ref<Event[]>([])
@@ -14,8 +13,6 @@ const newName = ref('')
 const newDate = ref('')
 const newDesc = ref('')
 const newType = ref<'tasting' | 'roll'>('tasting')
-const baskets = ref<Basket[]>([])
-const selectedBasket = ref<Basket | null>(null)
 
 const isAdmin = computed(() => authStore.user?.role === 'admin')
 
@@ -35,31 +32,18 @@ async function loadEvents() {
   events.value = await listEvents()
 }
 
-async function loadBaskets() {
-  try { baskets.value = await listBaskets() } catch { baskets.value = [] }
-}
-
-async function onTypeChange() {
-  if (newType.value === 'roll' && baskets.value.length === 0) {
-    await loadBaskets()
-  }
-}
-
 async function doCreate() {
   if (!newName.value.trim()) return
-  if (newType.value === 'roll' && !selectedBasket.value) return
   const ev = await createEvent(
     newName.value.trim(),
     newDesc.value.trim(),
     newDate.value.trim(),
     newType.value,
-    newType.value === 'roll' ? selectedBasket.value!.id : undefined,
   )
   newName.value = ''
   newDate.value = ''
   newDesc.value = ''
   newType.value = 'tasting'
-  selectedBasket.value = null
   await loadEvents()
   activeEvent.value = ev
 }
@@ -98,18 +82,15 @@ onMounted(loadEvents)
       </div>
       <div v-if="isAdmin" class="event-create-row">
         <label class="type-toggle">
-          <input type="radio" value="tasting" v-model="newType" @change="onTypeChange" /> Tasting
+          <input type="radio" value="tasting" v-model="newType" /> Tasting
         </label>
         <label class="type-toggle">
-          <input type="radio" value="roll" v-model="newType" @change="onTypeChange" /> Roll
+          <input type="radio" value="roll" v-model="newType" /> Roll
         </label>
-      </div>
-      <div v-if="newType === 'roll'" class="event-create-row">
-        <Select v-model="selectedBasket" :options="baskets" optionLabel="name" placeholder="Select basket..." style="flex: 1;" />
       </div>
       <div class="event-create-row">
         <InputText v-model="newDesc" placeholder="Description (optional)" size="small" style="flex: 1;" />
-        <Button label="Create Event" icon="pi pi-plus" size="small" @click="doCreate" :disabled="!newName.trim() || (newType === 'roll' && !selectedBasket)" />
+        <Button label="Create Event" icon="pi pi-plus" size="small" @click="doCreate" :disabled="!newName.trim()" />
       </div>
     </div>
 

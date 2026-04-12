@@ -198,7 +198,7 @@ onMounted(loadUsers)
       <div class="danger-row">
         <div>
           <strong>Remove all products</strong>
-          <p class="danger-desc">Delete every product from the database. Baskets and lists referencing them will break.</p>
+          <p class="danger-desc">Delete every product from the database. Lists referencing them will break.</p>
         </div>
         <Button label="Delete all products" icon="pi pi-trash" severity="danger" size="small" :loading="purging" @click="doPurgeProducts" />
       </div>

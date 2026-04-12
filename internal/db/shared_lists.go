@@ -8,15 +8,24 @@ import (
 	"time"
 )
 
+type SharedListShareUser struct {
+	UserID   int    `json:"userId"`
+	Username string `json:"username"`
+}
+
 type SharedList struct {
-	ID        int              `json:"id"`
-	UUID      string           `json:"uuid"`
-	Name      string           `json:"name"`
-	UserID    int              `json:"userId"`
-	OwnerName string           `json:"ownerName"`
-	ItemCount int              `json:"itemCount"`
-	CreatedAt string           `json:"createdAt"`
-	Items     []SharedListItem `json:"items,omitempty"`
+	ID         int                   `json:"id"`
+	UUID       string                `json:"uuid"`
+	Name       string                `json:"name"`
+	UserID     int                   `json:"userId"`
+	OwnerName  string                `json:"ownerName"`
+	Shared     bool                  `json:"shared"`
+	Locked     bool                  `json:"locked"`
+	SharedWith []SharedListShareUser `json:"sharedWith,omitempty"`
+	ItemCount  int                   `json:"itemCount"`
+	Total      float64               `json:"total"`
+	CreatedAt  string                `json:"createdAt"`
+	Items      []SharedListItem      `json:"items,omitempty"`
 }
 
 type SharedListItem struct {
@@ -38,6 +47,7 @@ type SharedListItem struct {
 	Usage           string  `json:"usage"`
 	IsOrganic       bool    `json:"isOrganic"`
 	Quantity        int     `json:"quantity"`
+	AddedBy         string  `json:"addedBy"`
 	AddedAt         string  `json:"addedAt"`
 }
 
@@ -76,16 +86,66 @@ func (db *DB) CreateSharedList(name string, userID int) (SharedList, error) {
 	}, nil
 }
 
+func (db *DB) canAccessSharedList(listID, userID int) (isOwner bool, err error) {
+	var ownerID int
+	err = db.conn.QueryRow("SELECT user_id FROM shared_lists WHERE id = ?", listID).Scan(&ownerID)
+	if err != nil {
+		return false, fmt.Errorf("list not found")
+	}
+	if ownerID == userID {
+		return true, nil
+	}
+	var count int
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM shared_list_shares WHERE list_id = ? AND user_id = ?", listID, userID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return false, nil
+	}
+	return false, fmt.Errorf("list not found")
+}
+
+func (db *DB) getSharedListCollaborators(listID int) ([]SharedListShareUser, error) {
+	rows, err := db.conn.Query(`
+		SELECT sls.user_id, u.username
+		FROM shared_list_shares sls
+		JOIN users u ON u.id = sls.user_id
+		WHERE sls.list_id = ?
+		ORDER BY u.username
+	`, listID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []SharedListShareUser
+	for rows.Next() {
+		var u SharedListShareUser
+		if err := rows.Scan(&u.UserID, &u.Username); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, nil
+}
+
 func (db *DB) ListSharedLists(userID int) ([]SharedList, error) {
 	rows, err := db.conn.Query(`
 		SELECT sl.id, sl.uuid, sl.name, sl.user_id, u.username,
-			(SELECT COUNT(*) FROM shared_list_items WHERE list_id = sl.id),
+			sl.locked,
+			COALESCE(SUM(sli.quantity), 0),
+			COALESCE(SUM(sli.quantity * p.price), 0),
 			sl.created_at
 		FROM shared_lists sl
 		JOIN users u ON u.id = sl.user_id
+		LEFT JOIN shared_list_items sli ON sli.list_id = sl.id
+		LEFT JOIN products p ON p.product_id = sli.product_id
 		WHERE sl.user_id = ?
+		   OR sl.id IN (SELECT list_id FROM shared_list_shares WHERE user_id = ?)
+		GROUP BY sl.id
 		ORDER BY sl.created_at DESC
-	`, userID)
+	`, userID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,25 +154,37 @@ func (db *DB) ListSharedLists(userID int) ([]SharedList, error) {
 	var lists []SharedList
 	for rows.Next() {
 		var l SharedList
-		if err := rows.Scan(&l.ID, &l.UUID, &l.Name, &l.UserID, &l.OwnerName, &l.ItemCount, &l.CreatedAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.UUID, &l.Name, &l.UserID, &l.OwnerName, &l.Locked, &l.ItemCount, &l.Total, &l.CreatedAt); err != nil {
 			return nil, err
 		}
+		l.Shared = l.UserID != userID
+		sw, _ := db.getSharedListCollaborators(l.ID)
+		l.SharedWith = sw
 		lists = append(lists, l)
 	}
 	return lists, nil
 }
 
 func (db *DB) GetSharedList(id, userID int) (SharedList, error) {
-	var l SharedList
-	err := db.conn.QueryRow(`
-		SELECT sl.id, sl.uuid, sl.name, sl.user_id, u.username, sl.created_at
-		FROM shared_lists sl
-		JOIN users u ON u.id = sl.user_id
-		WHERE sl.id = ? AND sl.user_id = ?
-	`, id, userID).Scan(&l.ID, &l.UUID, &l.Name, &l.UserID, &l.OwnerName, &l.CreatedAt)
+	_, err := db.canAccessSharedList(id, userID)
 	if err != nil {
 		return SharedList{}, err
 	}
+
+	var l SharedList
+	err = db.conn.QueryRow(`
+		SELECT sl.id, sl.uuid, sl.name, sl.user_id, u.username, sl.locked, sl.created_at
+		FROM shared_lists sl
+		JOIN users u ON u.id = sl.user_id
+		WHERE sl.id = ?
+	`, id).Scan(&l.ID, &l.UUID, &l.Name, &l.UserID, &l.OwnerName, &l.Locked, &l.CreatedAt)
+	if err != nil {
+		return SharedList{}, err
+	}
+
+	l.Shared = l.UserID != userID
+	sw, _ := db.getSharedListCollaborators(id)
+	l.SharedWith = sw
 
 	items, err := db.getSharedListItems(id)
 	if err != nil {
@@ -120,17 +192,20 @@ func (db *DB) GetSharedList(id, userID int) (SharedList, error) {
 	}
 	l.Items = items
 	l.ItemCount = len(items)
+	for _, item := range items {
+		l.Total += float64(item.Quantity) * item.Price
+	}
 	return l, nil
 }
 
 func (db *DB) GetSharedListByUUID(uuid string) (SharedList, error) {
 	var l SharedList
 	err := db.conn.QueryRow(`
-		SELECT sl.id, sl.uuid, sl.name, sl.user_id, u.username, sl.created_at
+		SELECT sl.id, sl.uuid, sl.name, sl.user_id, u.username, sl.locked, sl.created_at
 		FROM shared_lists sl
 		JOIN users u ON u.id = sl.user_id
 		WHERE sl.uuid = ?
-	`, uuid).Scan(&l.ID, &l.UUID, &l.Name, &l.UserID, &l.OwnerName, &l.CreatedAt)
+	`, uuid).Scan(&l.ID, &l.UUID, &l.Name, &l.UserID, &l.OwnerName, &l.Locked, &l.CreatedAt)
 	if err != nil {
 		return SharedList{}, err
 	}
@@ -141,6 +216,9 @@ func (db *DB) GetSharedListByUUID(uuid string) (SharedList, error) {
 	}
 	l.Items = items
 	l.ItemCount = len(items)
+	for _, item := range items {
+		l.Total += float64(item.Quantity) * item.Price
+	}
 	return l, nil
 }
 
@@ -150,9 +228,10 @@ func (db *DB) getSharedListItems(listID int) ([]SharedListItem, error) {
 			p.price, p.volume, p.volume_text, p.alcohol_pct,
 			p.country, p.category_level1, p.category_level2,
 			p.packaging_level1, p.image_url, p.taste, p.usage, p.is_organic,
-			sli.quantity, sli.added_at
+			sli.quantity, COALESCE(u.username, ''), sli.added_at
 		FROM shared_list_items sli
 		JOIN products p ON p.product_id = sli.product_id
+		LEFT JOIN users u ON u.id = sli.added_by
 		WHERE sli.list_id = ?
 		ORDER BY sli.added_at
 	`, listID)
@@ -172,7 +251,7 @@ func (db *DB) getSharedListItems(listID int) ([]SharedListItem, error) {
 			&item.Price, &item.Volume, &item.VolumeText, &item.AlcoholPct,
 			&item.Country, &item.CategoryLevel1, &item.CategoryLevel2,
 			&item.PackagingLevel1, &item.ImageURL, &taste, &usage, &isOrganic,
-			&item.Quantity, &item.AddedAt,
+			&item.Quantity, &item.AddedBy, &item.AddedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -191,16 +270,36 @@ func (db *DB) getSharedListItems(listID int) ([]SharedListItem, error) {
 	return items, nil
 }
 
-func (db *DB) AddToSharedList(listID int, productID string, quantity int) error {
-	_, err := db.conn.Exec(`
-		INSERT INTO shared_list_items (list_id, product_id, quantity, added_at)
-		VALUES (?, ?, ?, ?)
+func (db *DB) isSharedListLocked(listID int) bool {
+	var locked bool
+	db.conn.QueryRow("SELECT locked FROM shared_lists WHERE id = ?", listID).Scan(&locked)
+	return locked
+}
+
+func (db *DB) AddToSharedList(listID int, productID string, quantity int, userID int) error {
+	_, err := db.canAccessSharedList(listID, userID)
+	if err != nil {
+		return err
+	}
+	if db.isSharedListLocked(listID) {
+		return fmt.Errorf("list is locked")
+	}
+	_, err = db.conn.Exec(`
+		INSERT INTO shared_list_items (list_id, product_id, quantity, added_by, added_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(list_id, product_id) DO UPDATE SET quantity = quantity + ?
-	`, listID, productID, quantity, time.Now().Format(time.RFC3339), quantity)
+	`, listID, productID, quantity, userID, time.Now().Format(time.RFC3339), quantity)
 	return err
 }
 
-func (db *DB) RemoveFromSharedList(listID int, productID string) error {
+func (db *DB) RemoveFromSharedList(listID int, productID string, userID int) error {
+	_, err := db.canAccessSharedList(listID, userID)
+	if err != nil {
+		return err
+	}
+	if db.isSharedListLocked(listID) {
+		return fmt.Errorf("list is locked")
+	}
 	res, err := db.conn.Exec(
 		`DELETE FROM shared_list_items WHERE list_id = ? AND product_id = ?`,
 		listID, productID,
@@ -215,84 +314,50 @@ func (db *DB) RemoveFromSharedList(listID int, productID string) error {
 	return nil
 }
 
-// ImportBasketToSharedList imports basket items into a shared list.
-// If an item already exists with the same quantity, it is skipped.
-// If it exists with a different quantity, the quantity is updated.
-// Returns the number of items imported or updated.
-func (db *DB) ImportBasketToSharedList(listID, basketID, userID int) (int, error) {
-	// Verify the user owns the shared list
-	var listOwner int
-	err := db.conn.QueryRow("SELECT user_id FROM shared_lists WHERE id = ?", listID).Scan(&listOwner)
+func (db *DB) UpdateSharedListItemQuantity(listID int, productID string, quantity int, userID int) error {
+	_, err := db.canAccessSharedList(listID, userID)
 	if err != nil {
-		return 0, fmt.Errorf("shared list not found")
+		return err
 	}
-	if listOwner != userID {
-		return 0, fmt.Errorf("not your shared list")
+	if db.isSharedListLocked(listID) {
+		return fmt.Errorf("list is locked")
 	}
+	if quantity <= 0 {
+		return db.RemoveFromSharedList(listID, productID, userID)
+	}
+	_, err = db.conn.Exec(
+		"UPDATE shared_list_items SET quantity = ? WHERE list_id = ? AND product_id = ?",
+		quantity, listID, productID)
+	return err
+}
 
-	// Verify the user can access the basket
-	_, err = db.canAccessBasket(basketID, userID)
+func (db *DB) RenameSharedList(id int, name string, userID int) error {
+	res, err := db.conn.Exec("UPDATE shared_lists SET name = ? WHERE id = ? AND user_id = ?", name, id, userID)
 	if err != nil {
-		return 0, err
+		return err
 	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("list not found or not owned by you")
+	}
+	return nil
+}
 
-	// Get basket items
-	rows, err := db.conn.Query(
-		"SELECT product_id, quantity FROM basket_items WHERE basket_id = ?", basketID)
+func (db *DB) SetSharedListLocked(listID int, locked bool, userID int, isAdmin bool) error {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM shared_lists WHERE id = ?", listID).Scan(&ownerID)
 	if err != nil {
-		return 0, err
+		return fmt.Errorf("list not found")
 	}
-	defer rows.Close()
-
-	type basketEntry struct {
-		productID string
-		quantity  int
+	if ownerID != userID && !isAdmin {
+		return fmt.Errorf("only the owner or admin can lock/unlock a list")
 	}
-	var entries []basketEntry
-	for rows.Next() {
-		var e basketEntry
-		if err := rows.Scan(&e.productID, &e.quantity); err != nil {
-			return 0, err
-		}
-		entries = append(entries, e)
+	val := 0
+	if locked {
+		val = 1
 	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-
-	now := time.Now().Format(time.RFC3339)
-	changed := 0
-	for _, e := range entries {
-		// Check if item already exists with the same quantity
-		var existingQty int
-		err := db.conn.QueryRow(
-			"SELECT quantity FROM shared_list_items WHERE list_id = ? AND product_id = ?",
-			listID, e.productID).Scan(&existingQty)
-		if err == sql.ErrNoRows {
-			// Insert new item
-			_, err = db.conn.Exec(
-				"INSERT INTO shared_list_items (list_id, product_id, quantity, added_at) VALUES (?, ?, ?, ?)",
-				listID, e.productID, e.quantity, now)
-			if err != nil {
-				return 0, err
-			}
-			changed++
-		} else if err != nil {
-			return 0, err
-		} else if existingQty != e.quantity {
-			// Update quantity only if different
-			_, err = db.conn.Exec(
-				"UPDATE shared_list_items SET quantity = ? WHERE list_id = ? AND product_id = ?",
-				e.quantity, listID, e.productID)
-			if err != nil {
-				return 0, err
-			}
-			changed++
-		}
-		// else: same quantity, skip
-	}
-
-	return changed, nil
+	_, err = db.conn.Exec("UPDATE shared_lists SET locked = ? WHERE id = ?", val, listID)
+	return err
 }
 
 func (db *DB) DeleteSharedList(id, userID int) error {
@@ -308,4 +373,36 @@ func (db *DB) DeleteSharedList(id, userID int) error {
 		return fmt.Errorf("list not found or not owned by user")
 	}
 	return nil
+}
+
+func (db *DB) ShareSharedList(listID, ownerID, targetUserID int) error {
+	if ownerID == targetUserID {
+		return fmt.Errorf("cannot share with yourself")
+	}
+	var actualOwner int
+	err := db.conn.QueryRow("SELECT user_id FROM shared_lists WHERE id = ?", listID).Scan(&actualOwner)
+	if err != nil {
+		return fmt.Errorf("list not found")
+	}
+	if actualOwner != ownerID {
+		return fmt.Errorf("only the owner can share a list")
+	}
+	_, err = db.conn.Exec(`
+		INSERT INTO shared_list_shares (list_id, user_id) VALUES (?, ?)
+		ON CONFLICT DO NOTHING
+	`, listID, targetUserID)
+	return err
+}
+
+func (db *DB) UnshareSharedList(listID, callerID, targetUserID int) error {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM shared_lists WHERE id = ?", listID).Scan(&ownerID)
+	if err != nil {
+		return fmt.Errorf("list not found")
+	}
+	if callerID != ownerID && callerID != targetUserID {
+		return fmt.Errorf("not allowed")
+	}
+	_, err = db.conn.Exec("DELETE FROM shared_list_shares WHERE list_id = ? AND user_id = ?", listID, targetUserID)
+	return err
 }

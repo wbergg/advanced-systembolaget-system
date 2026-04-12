@@ -7,6 +7,22 @@ import (
 	"advanced-systembolaget-system/internal/systembolaget"
 )
 
+// sqlFold wraps a SQL column expression so it lowercases both ASCII (via LOWER)
+// and common non-ASCII characters that SQLite's LOWER() ignores.
+func sqlFold(col string) string {
+	// LOWER() handles A-Z; REPLACE() handles the rest.
+	expr := fmt.Sprintf("LOWER(%s)", col)
+	for _, r := range [][2]string{
+		{"Å", "å"}, {"Ä", "ä"}, {"Ö", "ö"},
+		{"Ü", "ü"}, {"É", "é"}, {"È", "è"},
+		{"Á", "á"}, {"Í", "í"}, {"Ó", "ó"},
+		{"Ñ", "ñ"},
+	} {
+		expr = fmt.Sprintf("REPLACE(%s,'%s','%s')", expr, r[0], r[1])
+	}
+	return expr
+}
+
 type ProductWithNote struct {
 	systembolaget.Product
 	Note *string `json:"note"`
@@ -43,8 +59,9 @@ func (db *DB) UpsertProducts(products []systembolaget.Product) error {
 			producer_name, price, volume, volume_text, alcohol_pct,
 			country, category_level1, category_level2, assortment_text,
 			taste, usage, is_organic, is_news, packaging_level1,
-			assortment, product_launch_date, vintage, image_url, synced_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			assortment, product_launch_date, restricted_parcel_qty,
+			vintage, image_url, synced_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	`)
 	if err != nil {
 		return err
@@ -57,7 +74,8 @@ func (db *DB) UpsertProducts(products []systembolaget.Product) error {
 			p.ProducerName, p.Price, p.Volume, p.VolumeText, p.AlcoholPercent,
 			p.Country, p.CategoryLevel1, p.CategoryLevel2, p.AssortmentText,
 			p.Taste, p.Usage, p.IsOrganic, p.IsNews, p.PackagingLevel1,
-			p.Assortment, p.ProductLaunchDate, p.Vintage, p.ImageURL,
+			p.Assortment, p.ProductLaunchDate, p.RestrictedParcelQuantity,
+			p.Vintage, p.ImageURL,
 		)
 		if err != nil {
 			return fmt.Errorf("upsert product %s: %w", p.ProductID, err)
@@ -79,8 +97,9 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 	var args []any
 
 	if f.Search != "" {
-		where = append(where, "(p.name_bold LIKE ? OR p.producer_name LIKE ? OR p.taste LIKE ?)")
-		s := "%" + f.Search + "%"
+		where = append(where, fmt.Sprintf("(%s LIKE ? OR %s LIKE ? OR %s LIKE ?)",
+			sqlFold("p.name_bold"), sqlFold("p.producer_name"), sqlFold("p.taste")))
+		s := "%" + strings.ToLower(f.Search) + "%"
 		args = append(args, s, s, s)
 	}
 	if f.Category != "" {
@@ -96,12 +115,12 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 		args = append(args, *f.MaxPrice)
 	}
 	if f.Name != "" {
-		where = append(where, "p.name_bold LIKE ?")
-		args = append(args, "%"+f.Name+"%")
+		where = append(where, fmt.Sprintf("%s LIKE ?", sqlFold("p.name_bold")))
+		args = append(args, "%"+strings.ToLower(f.Name)+"%")
 	}
 	if f.Producer != "" {
-		where = append(where, "p.producer_name LIKE ?")
-		args = append(args, "%"+f.Producer+"%")
+		where = append(where, fmt.Sprintf("%s LIKE ?", sqlFold("p.producer_name")))
+		args = append(args, "%"+strings.ToLower(f.Producer)+"%")
 	}
 	if f.MinAbv != nil {
 		where = append(where, "p.alcohol_pct >= ?")
@@ -178,7 +197,7 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 			p.producer_name, p.price, p.volume, p.volume_text, p.alcohol_pct,
 			p.country, p.category_level1, p.category_level2, p.assortment_text,
 			p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
-			p.assortment, p.vintage, p.image_url, n.note
+			p.assortment, p.restricted_parcel_qty, p.vintage, p.image_url, n.note
 		FROM products p
 		LEFT JOIN notes n ON p.product_id = n.product_id
 		%s
@@ -201,7 +220,7 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 			&p.ProducerName, &p.Price, &p.Volume, &p.VolumeText, &p.AlcoholPercent,
 			&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &p.AssortmentText,
 			&p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
-			&p.Assortment, &p.Vintage, &p.ImageURL, &p.Note,
+			&p.Assortment, &p.RestrictedParcelQuantity, &p.Vintage, &p.ImageURL, &p.Note,
 		)
 		if err != nil {
 			return nil, 0, err
@@ -219,7 +238,7 @@ func (db *DB) GetProduct(id string) (*ProductWithNote, error) {
 			p.producer_name, p.price, p.volume, p.volume_text, p.alcohol_pct,
 			p.country, p.category_level1, p.category_level2, p.assortment_text,
 			p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
-			p.assortment, p.vintage, p.image_url, n.note
+			p.assortment, p.restricted_parcel_qty, p.vintage, p.image_url, n.note
 		FROM products p
 		LEFT JOIN notes n ON p.product_id = n.product_id
 		WHERE p.product_id = ?
@@ -228,7 +247,7 @@ func (db *DB) GetProduct(id string) (*ProductWithNote, error) {
 		&p.ProducerName, &p.Price, &p.Volume, &p.VolumeText, &p.AlcoholPercent,
 		&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &p.AssortmentText,
 		&p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
-		&p.Assortment, &p.Vintage, &p.ImageURL, &p.Note,
+		&p.Assortment, &p.RestrictedParcelQuantity, &p.Vintage, &p.ImageURL, &p.Note,
 	)
 	if err != nil {
 		return nil, err
@@ -273,7 +292,7 @@ func (db *DB) DeleteProduct(id string) error {
 	defer tx.Rollback()
 
 	for _, table := range []string{
-		"notes", "comments", "basket_items", "shared_list_items",
+		"notes", "comments", "shared_list_items",
 		"event_beers", "roll_pool",
 	} {
 		if _, err := tx.Exec("DELETE FROM "+table+" WHERE product_id = ?", id); err != nil {
@@ -301,7 +320,7 @@ func (db *DB) DeleteAllProducts() (int64, error) {
 
 	// Delete from all tables that reference products
 	for _, table := range []string{
-		"notes", "comments", "basket_items", "shared_list_items",
+		"notes", "comments", "shared_list_items",
 		"event_beers", "roll_pool",
 	} {
 		if _, err := tx.Exec("DELETE FROM " + table); err != nil {

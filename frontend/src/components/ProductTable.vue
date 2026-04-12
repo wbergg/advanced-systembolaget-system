@@ -7,12 +7,12 @@ import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
 import ProductDetail from './ProductDetail.vue'
 import Button from 'primevue/button'
-import { getProducts, getDistinctValues, addToBasket, createBasket, addToSharedList, deleteProduct, type Product, type ListParams } from '../api/client'
+import { getProducts, getDistinctValues, addToSharedList, deleteProduct, type Product, type ListParams } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
-const props = defineProps<{ activeBasketId?: number; activeSharedListId?: number }>()
-const emit = defineEmits<{ basketChanged: []; newBasket: [id: number]; sharedListChanged: [] }>()
+const props = defineProps<{ activeSharedListId?: number }>()
+const emit = defineEmits<{ sharedListChanged: [] }>()
 
 const products = ref<Product[]>([])
 const totalRecords = ref(0)
@@ -150,26 +150,6 @@ function showError(msg: string) {
   errorMsg.value = msg
   clearTimeout(errorTimeout)
   errorTimeout = setTimeout(() => { errorMsg.value = '' }, 4000)
-}
-
-async function doAddToBasket(productId: string) {
-  try {
-    let basketId = props.activeBasketId
-    if (!basketId) {
-      const b = await createBasket(new Date().toLocaleDateString('sv-SE'))
-      basketId = b.id
-      emit('newBasket', basketId)
-    }
-    await addToBasket(basketId, productId)
-    emit('basketChanged')
-  } catch (e: any) {
-    const msg = e?.message || String(e)
-    if (msg.includes('locked')) {
-      showError('This basket is locked and cannot be edited.')
-    } else {
-      showError(msg)
-    }
-  }
 }
 
 async function doAddToSharedList(productId: string) {
@@ -369,9 +349,6 @@ onMounted(() => {
       <Column header="" :style="{ width: authStore.isAdmin ? '120px' : '90px' }">
         <template #body="{ data }">
           <div style="display: flex; gap: 0.25rem;">
-            <Button icon="pi pi-cart-plus" severity="success" rounded size="small"
-              title="Add to basket"
-              @click="doAddToBasket(data.productId)" />
             <Button icon="pi pi-list" severity="info" rounded size="small"
               title="Add to shared list"
               @click="doAddToSharedList(data.productId)" />

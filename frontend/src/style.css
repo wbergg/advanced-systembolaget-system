@@ -2,7 +2,7 @@
 :root {
   --font: 'Outfit', system-ui, -apple-system, sans-serif;
   font-family: var(--font);
-  font-size: 15px;
+  font-size: 19px;
   line-height: 1.55;
   font-weight: 400;
 

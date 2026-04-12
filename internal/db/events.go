@@ -14,7 +14,6 @@ type Event struct {
 	OwnerName     string          `json:"ownerName"`
 	Locked        bool            `json:"locked"`
 	Type          string          `json:"type"`
-	BasketID      *int            `json:"basketId"`
 	Hidden        bool            `json:"hidden"`
 	CreatedAt     time.Time       `json:"createdAt"`
 	Attendees     []EventAttendee `json:"attendees,omitempty"`
@@ -42,6 +41,10 @@ type EventScore struct {
 	EventBeerID int `json:"eventBeerId"`
 	UserID      int `json:"userId"`
 	Score       int `json:"score"`
+}
+
+func (db *DB) GetEventType(eventID int, eventType *string) error {
+	return db.conn.QueryRow("SELECT type FROM events WHERE id = ?", eventID).Scan(eventType)
 }
 
 func (db *DB) CanAccessEvent(eventID, userID int, isAdmin bool) (isOwner bool, err error) {
@@ -79,7 +82,7 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 	rows, err := db.conn.Query(`
 		SELECT e.id, e.name, e.description, e.event_date,
 			e.user_id, COALESCE(u.username, ''), e.locked,
-			e.type, e.basket_id, e.hidden,
+			e.type, e.hidden,
 			e.created_at,
 			(SELECT COUNT(*) FROM event_attendees WHERE event_id = e.id) AS attendee_count,
 			CASE WHEN e.type = 'roll'
@@ -102,7 +105,7 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 		var ev Event
 		if err := rows.Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
 			&ev.OwnerID, &ev.OwnerName, &ev.Locked,
-			&ev.Type, &ev.BasketID, &ev.Hidden,
+			&ev.Type, &ev.Hidden,
 			&ev.CreatedAt,
 			&ev.AttendeeCount, &ev.BeerCount); err != nil {
 			return nil, err
@@ -112,64 +115,26 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 	return events, rows.Err()
 }
 
-func (db *DB) CreateEvent(name, description, eventDate string, userID int, eventType string, basketID *int) (*Event, error) {
+func (db *DB) CreateEvent(name, description, eventDate string, userID int, eventType string) (*Event, error) {
 	if eventType == "" {
 		eventType = "tasting"
 	}
 	hidden := 0
 	if eventType == "roll" {
 		hidden = 1
-		if basketID == nil {
-			return nil, fmt.Errorf("basket is required for roll events")
-		}
 	}
 
-	tx, err := db.conn.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	res, err := tx.Exec(
-		"INSERT INTO events (name, description, event_date, user_id, type, basket_id, hidden) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		name, description, eventDate, userID, eventType, basketID, hidden)
+	res, err := db.conn.Exec(
+		"INSERT INTO events (name, description, event_date, user_id, type, hidden) VALUES (?, ?, ?, ?, ?, ?)",
+		name, description, eventDate, userID, eventType, hidden)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
 
-	// For roll events, expand basket items into roll_pool (1 row per quantity unit)
-	if eventType == "roll" {
-		rows, err := tx.Query("SELECT product_id, quantity FROM basket_items WHERE basket_id = ?", *basketID)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var productID string
-			var qty int
-			if err := rows.Scan(&productID, &qty); err != nil {
-				return nil, err
-			}
-			for i := 0; i < qty; i++ {
-				_, err := tx.Exec("INSERT INTO roll_pool (event_id, product_id) VALUES (?, ?)", id, productID)
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-
 	return &Event{
 		ID: int(id), Name: name, Description: description, EventDate: eventDate,
-		OwnerID: userID, Type: eventType, BasketID: basketID, Hidden: hidden == 1,
+		OwnerID: userID, Type: eventType, Hidden: hidden == 1,
 		CreatedAt: time.Now(),
 	}, nil
 }
@@ -186,13 +151,13 @@ func (db *DB) GetEvent(id, userID int, isAdmin bool) (*Event, error) {
 	err := db.conn.QueryRow(`
 		SELECT e.id, e.name, e.description, e.event_date,
 			e.user_id, COALESCE(u.username, ''), e.locked,
-			e.type, e.basket_id, e.hidden,
+			e.type, e.hidden,
 			e.created_at
 		FROM events e LEFT JOIN users u ON e.user_id = u.id
 		WHERE e.id = ?
 	`, id).Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
 		&ev.OwnerID, &ev.OwnerName, &ev.Locked,
-		&ev.Type, &ev.BasketID, &ev.Hidden,
+		&ev.Type, &ev.Hidden,
 		&ev.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -349,19 +314,23 @@ func (db *DB) UninviteFromEvent(eventID, callerID, targetUserID int) error {
 	return err
 }
 
-func (db *DB) ImportBasketToEvent(eventID, basketID, userID int, isAdmin bool) error {
+func (db *DB) ImportSharedListToEvent(eventID, listID, userID int, isAdmin bool) error {
 	var ownerID int
 	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
 	if err != nil {
 		return fmt.Errorf("event not found")
 	}
 	if ownerID != userID && !isAdmin {
-		return fmt.Errorf("only the owner or admin can import baskets")
+		return fmt.Errorf("only the owner or admin can import lists")
+	}
+	_, err = db.canAccessSharedList(listID, userID)
+	if err != nil {
+		return err
 	}
 	_, err = db.conn.Exec(`
 		INSERT OR IGNORE INTO event_beers (event_id, product_id)
-		SELECT ?, product_id FROM basket_items WHERE basket_id = ?
-	`, eventID, basketID)
+		SELECT ?, product_id FROM shared_list_items WHERE list_id = ?
+	`, eventID, listID)
 	return err
 }
 

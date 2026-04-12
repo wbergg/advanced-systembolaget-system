@@ -8,9 +8,9 @@ import RollGame from './RollGame.vue'
 import { useAuthStore } from '../stores/auth'
 import {
   getEvent, setEventLocked, inviteToEvent, uninviteFromEvent,
-  importBasketToEvent, removeBeerFromEvent, setScore, deleteScore,
-  listAllUsers, listBaskets, setEventHidden,
-  type Event, type EventBeer, type ShareUser, type Basket
+  importSharedListToEvent, removeBeerFromEvent, setScore, deleteScore,
+  listAllUsers, listSharedLists, setEventHidden,
+  type Event, type EventBeer, type ShareUser, type SharedList
 } from '../api/client'
 
 const props = defineProps<{ eventId: number }>()
@@ -25,9 +25,9 @@ const inviteDialogVisible = ref(false)
 const allUsers = ref<ShareUser[]>([])
 const inviteBusy = ref<Set<number>>(new Set())
 
-// Import basket
-const baskets = ref<Basket[]>([])
-const selectedBasket = ref<Basket | null>(null)
+// Import shared list
+const sharedLists = ref<SharedList[]>([])
+const selectedList = ref<SharedList | null>(null)
 const importDialogVisible = ref(false)
 
 // Score editing
@@ -119,16 +119,16 @@ async function toggleInvite(userId: number) {
   }
 }
 
-// Import basket
+// Import shared list
 async function openImportDialog() {
-  try { baskets.value = await listBaskets() } catch { baskets.value = [] }
-  selectedBasket.value = null
+  try { sharedLists.value = await listSharedLists() } catch { sharedLists.value = [] }
+  selectedList.value = null
   importDialogVisible.value = true
 }
 
 async function doImport() {
-  if (!event.value || !selectedBasket.value) return
-  await importBasketToEvent(event.value.id, selectedBasket.value.id)
+  if (!event.value || !selectedList.value) return
+  await importSharedListToEvent(event.value.id, selectedList.value.id)
   importDialogVisible.value = false
   await loadEvent()
 }
@@ -204,7 +204,7 @@ onMounted(loadEvent)
           <Button v-if="isRoll && isAdminUser" :label="event.hidden ? 'Reveal' : 'Hide'" :icon="event.hidden ? 'pi pi-eye' : 'pi pi-eye-slash'" size="small" :severity="event.hidden ? 'success' : 'warn'" @click="toggleHidden" />
           <Button v-if="canEdit()" :label="event.locked ? 'Unlock' : 'Lock'" :icon="event.locked ? 'pi pi-lock-open' : 'pi pi-lock'" size="small" :severity="event.locked ? 'warn' : 'secondary'" @click="toggleLock" />
           <Button v-if="isOwner()" label="Invite" icon="pi pi-user-plus" size="small" severity="secondary" @click="openInviteDialog" />
-          <Button v-if="canEdit() && !event.locked && !isRoll" label="Import Basket" icon="pi pi-download" size="small" severity="secondary" @click="openImportDialog" />
+          <Button v-if="canEdit() && !event.locked" label="Import List" icon="pi pi-download" size="small" severity="secondary" @click="openImportDialog" />
         </div>
       </div>
 
@@ -281,7 +281,7 @@ onMounted(loadEvent)
       </div>
 
       <div v-else-if="!isRoll" class="empty-state">
-        No beers yet. {{ canEdit() ? 'Import a basket to get started.' : 'The host needs to add beers.' }}
+        No beers yet. {{ canEdit() ? 'Import a list to get started.' : 'The host needs to add beers.' }}
       </div>
     </template>
 
@@ -297,14 +297,14 @@ onMounted(loadEvent)
       </div>
     </Dialog>
 
-    <!-- Import basket dialog -->
-    <Dialog v-model:visible="importDialogVisible" modal header="Import Basket" :style="{ width: '400px', maxWidth: '95vw' }">
+    <!-- Import list dialog -->
+    <Dialog v-model:visible="importDialogVisible" modal header="Import List" :style="{ width: '400px', maxWidth: '95vw' }">
       <div class="import-body">
         <p style="margin: 0 0 0.75rem; font-size: 0.85rem; color: #6b7280;">
-          Select a basket to import its beers:
+          Select a list to import its products:
         </p>
-        <Select v-model="selectedBasket" :options="baskets" optionLabel="name" placeholder="Select basket..." style="width: 100%;" />
-        <Button label="Import" icon="pi pi-download" size="small" style="margin-top: 0.75rem;" @click="doImport" :disabled="!selectedBasket" />
+        <Select v-model="selectedList" :options="sharedLists" optionLabel="name" placeholder="Select list..." style="width: 100%;" />
+        <Button label="Import" icon="pi pi-download" size="small" style="margin-top: 0.75rem;" @click="doImport" :disabled="!selectedList" />
       </div>
     </Dialog>
   </div>

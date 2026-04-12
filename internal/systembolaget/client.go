@@ -145,7 +145,7 @@ func FetchAll(apiKey string, query url.Values, progress ProgressFunc) ([]Product
 		resp.Body.Close()
 
 		for _, rp := range sr.Products {
-			if rp.IsRegionalRestricted || rp.IsDiscontinued || rp.IsCompletelyOutOfStock || rp.IsTemporaryOutOfStock {
+			if rp.IsRegionalRestricted || rp.IsDiscontinued || rp.IsCompletelyOutOfStock || rp.IsTemporaryOutOfStock || rp.RestrictedParcelQuantity > 0 {
 				continue
 			}
 			p := rp.Product

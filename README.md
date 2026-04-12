@@ -1,6 +1,6 @@
 # advanced-systembolaget-system
 
-Full-stack web application for searching, syncing, and collaborating on Systembolaget's product catalog. Includes multi-user auth, shopping baskets, tasting events with scoring, a roll game, shared public lists, and a standalone CLI for batch exports.
+Full-stack web application for searching, syncing, and collaborating on Systembolaget's product catalog. Includes multi-user auth, shared lists, tasting events with scoring, a roll game, public shareable lists, and a standalone CLI for batch exports.
 
 Built with Go (Gin), Vue 3 (PrimeVue), and SQLite.
 
@@ -53,7 +53,7 @@ cmd/
   cli/          Standalone CLI for batch product fetching
 internal/
   auth/         JWT authentication & middleware
-  db/           SQLite schema, queries (products, baskets, events, users, etc.)
+  db/           SQLite schema, queries (products, events, shared lists, users, etc.)
   handlers/     HTTP handlers (login, user management)
   systembolaget/ Systembolaget API client, key extraction, search params
 frontend/       Vue 3 + TypeScript SPA (PrimeVue, Pinia)
@@ -67,21 +67,17 @@ The frontend is embedded into the Go binary via `go:embed` and served as a singl
 
 Search and filter the full Systembolaget catalog. Sync products from Systembolaget's API directly from the web UI (with real-time progress via SSE). Filters include category, price range, ABV%, country, packaging, producer, vintage, and free text.
 
-### Baskets
+### Shared lists
 
-Create shopping baskets, add products with quantities, lock baskets when finalized, and share them with other users.
+Create collaborative shopping lists, add products with quantities, and share them with other users. Lock lists when finalized. Each list gets a public link (`/delad-lista/{uuid}`) viewable without login. Supports JSON export/import for transferring lists between instances.
 
 ### Tasting events
 
-Organize tastings: create an event, invite users, add beers, and score each product 0-10. Supports importing beers directly from a basket.
+Organize tastings: create an event, invite users, add beers, and score each product 0-10. Supports importing beers directly from a shared list. Lock events when scoring is complete.
 
 ### Roll game
 
-A game mode for events: add products to a pool, roll to randomly draw one, then accept or veto the pick.
-
-### Shared lists
-
-Create public lists with a shareable UUID link (`/delad-lista/{uuid}`) -- no login required to view.
+A game mode for events: add products to a pool, roll to randomly draw one, then accept or veto the pick. Each user gets one veto. Admins can undo vetoes/consumed items and reset the game.
 
 ### Comments & notes
 
@@ -89,7 +85,7 @@ Leave comments on products (visible to all users) and personal notes (visible on
 
 ### User management
 
-Admin panel for creating/managing users. Role-based access (admin/user), password requirements, and admin impersonation for debugging.
+Admin panel for creating/managing users. Role-based access (admin/user), password requirements (10+ chars, uppercase, digit), audit logging, and admin impersonation for debugging.
 
 ## API
 
@@ -101,11 +97,10 @@ All endpoints are under `/api/`. Authentication uses JWT tokens (24h expiry).
 | Products | `GET /products`, `GET /products/:id`, `GET /products/distinct/:column`, `PATCH /products/:id/notes` |
 | Comments | `GET /products/:id/comments`, `POST /products/:id/comments` |
 | Sync | `POST /sync` (SSE), `POST /key/refresh`, `GET /key/status` |
-| Baskets | CRUD on `/baskets`, items, locking, sharing |
-| Events | CRUD on `/events`, attendees, beers, scores, basket import |
+| Events | CRUD on `/events`, attendees, beers, scores, list import |
 | Roll game | `/events/:id/roll` (state, roll, accept, veto, reset) |
-| Shared lists | CRUD on `/shared-lists`, public view at `/public/shared-list/:uuid` |
-| Admin | `/admin/users` CRUD, `POST /admin/impersonate/:id`, `DELETE /admin/comments/:id` |
+| Shared lists | CRUD on `/shared-lists`, items, locking, sharing, public view at `/public/shared-list/:uuid` |
+| Admin | `/admin/users` CRUD, `POST /admin/impersonate/:id`, `DELETE /admin/comments/:id`, `DELETE /admin/products` |
 
 ## CLI tool
 

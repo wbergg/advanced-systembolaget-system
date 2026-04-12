@@ -22,10 +22,6 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
 
-	// Migrations
-	conn.Exec("ALTER TABLE products ADD COLUMN assortment TEXT DEFAULT ''")
-	conn.Exec("ALTER TABLE products ADD COLUMN product_launch_date TEXT DEFAULT ''")
-
 	return &DB{conn: conn}, nil
 }
 
@@ -65,6 +61,7 @@ func initSchema(conn *sql.DB) error {
 			packaging_level1 TEXT,
 			assortment       TEXT DEFAULT '',
 			product_launch_date TEXT DEFAULT '',
+			restricted_parcel_qty INTEGER DEFAULT 0,
 			vintage          TEXT,
 			image_url        TEXT,
 			synced_at        DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -79,31 +76,7 @@ func initSchema(conn *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_level1);
 		CREATE INDEX IF NOT EXISTS idx_products_price ON products(price);
 
-		CREATE TABLE IF NOT EXISTS baskets (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			name       TEXT NOT NULL,
-			user_id    INTEGER NOT NULL REFERENCES users(id),
-			locked     INTEGER NOT NULL DEFAULT 0,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-
-		CREATE TABLE IF NOT EXISTS basket_items (
-			basket_id  INTEGER NOT NULL REFERENCES baskets(id) ON DELETE CASCADE,
-			product_id TEXT NOT NULL REFERENCES products(product_id),
-			quantity   INTEGER NOT NULL DEFAULT 1,
-			added_by   INTEGER NOT NULL REFERENCES users(id),
-			added_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (basket_id, product_id)
-		);
-
-		CREATE TABLE IF NOT EXISTS basket_shares (
-			basket_id  INTEGER NOT NULL REFERENCES baskets(id) ON DELETE CASCADE,
-			user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (basket_id, user_id)
-		);
-
-		CREATE TABLE IF NOT EXISTS audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id    INTEGER NOT NULL REFERENCES users(id),
 			action     TEXT NOT NULL,
@@ -132,7 +105,7 @@ func initSchema(conn *sql.DB) error {
 			user_id     INTEGER NOT NULL REFERENCES users(id),
 			locked      INTEGER NOT NULL DEFAULT 0,
 			type        TEXT NOT NULL DEFAULT 'tasting',
-			basket_id   INTEGER REFERENCES baskets(id),
+			basket_id   INTEGER,
 			hidden      INTEGER NOT NULL DEFAULT 0,
 			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
@@ -188,6 +161,7 @@ func initSchema(conn *sql.DB) error {
 			uuid       TEXT NOT NULL UNIQUE,
 			name       TEXT NOT NULL,
 			user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			locked     INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
@@ -195,8 +169,16 @@ func initSchema(conn *sql.DB) error {
 			list_id    INTEGER NOT NULL REFERENCES shared_lists(id) ON DELETE CASCADE,
 			product_id TEXT NOT NULL REFERENCES products(product_id),
 			quantity   INTEGER NOT NULL DEFAULT 1,
+			added_by   INTEGER REFERENCES users(id),
 			added_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (list_id, product_id)
+		);
+
+		CREATE TABLE IF NOT EXISTS shared_list_shares (
+			list_id    INTEGER NOT NULL REFERENCES shared_lists(id) ON DELETE CASCADE,
+			user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (list_id, user_id)
 		);
 	`)
 	return err

@@ -3,13 +3,18 @@ import { ref, onMounted, computed } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Dialog from 'primevue/dialog'
-import Select from 'primevue/select'
+import Textarea from 'primevue/textarea'
+import Checkbox from 'primevue/checkbox'
+import { useAuthStore } from '../stores/auth'
 import {
   listSharedLists, createSharedList, getSharedList, deleteSharedList,
-  removeFromSharedList, importBasketToSharedList,
-  listBaskets,
-  type SharedList, type Basket,
+  removeFromSharedList, addToSharedList,
+  shareSharedList, unshareSharedList, listAllUsers,
+  renameSharedList, setSharedListLocked, updateSharedListItemQty,
+  type SharedList, type ShareUser,
 } from '../api/client'
+
+const authStore = useAuthStore()
 
 const lists = ref<SharedList[]>([])
 const activeList = ref<SharedList | null>(null)
@@ -17,12 +22,6 @@ const newListName = ref('')
 const loading = ref(false)
 const copied = ref(false)
 
-// Import basket state
-const importDialogVisible = ref(false)
-const availableBaskets = ref<Basket[]>([])
-const selectedBasketId = ref<number | null>(null)
-const importBusy = ref(false)
-const importResult = ref<string | null>(null)
 
 async function loadLists() {
   lists.value = await listSharedLists()
@@ -76,42 +75,101 @@ function openPublicUrl() {
   window.open(getPublicUrl(), '_blank')
 }
 
-async function openImportDialog() {
-  if (!activeList.value) return
-  importResult.value = null
-  selectedBasketId.value = null
-  try {
-    availableBaskets.value = await listBaskets()
-  } catch {
-    availableBaskets.value = []
-  }
-  importDialogVisible.value = true
+// Share state
+const shareDialogVisible = ref(false)
+const allUsers = ref<ShareUser[]>([])
+const shareBusy = ref<Set<number>>(new Set())
+
+function isOwner(l: SharedList) {
+  return l.userId === authStore.user?.id
 }
 
-const basketOptions = computed(() =>
-  availableBaskets.value
-    .filter(b => b.itemCount > 0)
-    .map(b => ({ label: `${b.name} (${b.itemCount} items)`, value: b.id }))
-)
+function ownedLists() {
+  return lists.value.filter(l => isOwner(l))
+}
 
-async function doImportBasket() {
-  if (!activeList.value || !selectedBasketId.value) return
-  importBusy.value = true
-  importResult.value = null
+function sharedLists() {
+  return lists.value.filter(l => !isOwner(l))
+}
+
+async function openShareDialog() {
+  if (!activeList.value) return
   try {
-    const res = await importBasketToSharedList(activeList.value.id, selectedBasketId.value)
-    if (res.imported === 0) {
-      importResult.value = 'No changes — all items already up to date.'
-    } else {
-      importResult.value = `${res.imported} item(s) imported or updated.`
-    }
-    await selectList(activeList.value.id)
-    await loadLists()
-  } catch (e: any) {
-    importResult.value = `Error: ${e?.message || String(e)}`
-  } finally {
-    importBusy.value = false
+    allUsers.value = await listAllUsers()
+  } catch {
+    allUsers.value = []
   }
+  shareDialogVisible.value = true
+}
+
+function otherUsers(): ShareUser[] {
+  return allUsers.value.filter(u => u.userId !== authStore.user?.id)
+}
+
+function isSharedWith(userId: number): boolean {
+  return (activeList.value?.sharedWith || []).some(u => u.userId === userId)
+}
+
+async function toggleShare(userId: number) {
+  if (!activeList.value || shareBusy.value.has(userId)) return
+  shareBusy.value.add(userId)
+  try {
+    if (isSharedWith(userId)) {
+      await unshareSharedList(activeList.value.id, userId)
+    } else {
+      await shareSharedList(activeList.value.id, userId)
+    }
+    activeList.value = await getSharedList(activeList.value.id)
+    await loadLists()
+  } finally {
+    shareBusy.value.delete(userId)
+  }
+}
+
+async function leaveSharedList() {
+  if (!activeList.value || !authStore.user) return
+  await unshareSharedList(activeList.value.id, authStore.user.id)
+  activeList.value = null
+  emit('update:activeId', undefined)
+  await loadLists()
+}
+
+// Lock
+function canToggleLock(l: SharedList) {
+  return isOwner(l) || authStore.user?.role === 'admin'
+}
+
+async function toggleLock() {
+  if (!activeList.value) return
+  await setSharedListLocked(activeList.value.id, !activeList.value.locked)
+  activeList.value = await getSharedList(activeList.value.id)
+  await loadLists()
+}
+
+// Rename
+const renameDialogVisible = ref(false)
+const renameText = ref('')
+
+function openRename() {
+  if (!activeList.value) return
+  renameText.value = activeList.value.name
+  renameDialogVisible.value = true
+}
+
+async function doRename() {
+  if (!activeList.value || !renameText.value.trim()) return
+  await renameSharedList(activeList.value.id, renameText.value.trim())
+  renameDialogVisible.value = false
+  activeList.value = await getSharedList(activeList.value.id)
+  await loadLists()
+}
+
+// Qty update
+async function updateQty(productId: string, newQty: number) {
+  if (!activeList.value) return
+  await updateSharedListItemQty(activeList.value.id, productId, newQty)
+  await selectList(activeList.value.id)
+  await loadLists()
 }
 
 const emit = defineEmits<{ 'update:activeId': [id: number | undefined] }>()
@@ -123,6 +181,85 @@ async function refreshActive() {
     await selectList(activeList.value.id)
   }
   await loadLists()
+}
+
+// Export / Import JSON
+const exportDialogVisible = ref(false)
+const exportText = ref('')
+const exportCopied = ref(false)
+const jsonImportDialogVisible = ref(false)
+const jsonImportText = ref('')
+const jsonImportBusy = ref(false)
+const jsonImportResult = ref<string | null>(null)
+
+function doExport() {
+  if (!activeList.value?.items?.length) return
+  const data = {
+    name: activeList.value.name,
+    items: activeList.value.items.map(i => ({
+      productId: i.productId,
+      quantity: i.quantity,
+    })),
+  }
+  exportText.value = JSON.stringify(data)
+  exportCopied.value = false
+  exportDialogVisible.value = true
+}
+
+async function copyExportText() {
+  await navigator.clipboard.writeText(exportText.value)
+  exportCopied.value = true
+  setTimeout(() => { exportCopied.value = false }, 2000)
+}
+
+function openJsonImport() {
+  jsonImportText.value = ''
+  jsonImportResult.value = null
+  jsonImportDialogVisible.value = true
+}
+
+async function doJsonImport() {
+  jsonImportResult.value = null
+  let parsed: { name?: string; items: { productId: string; quantity: number }[] }
+  try {
+    parsed = JSON.parse(jsonImportText.value)
+  } catch {
+    jsonImportResult.value = 'Invalid JSON.'
+    return
+  }
+  if (!parsed.items || !Array.isArray(parsed.items) || parsed.items.length === 0) {
+    jsonImportResult.value = 'No items found in data.'
+    return
+  }
+
+  jsonImportBusy.value = true
+  try {
+    let listId = activeList.value?.id
+    if (!listId) {
+      const name = parsed.name || `Import ${new Date().toLocaleDateString('sv-SE')}`
+      const l = await createSharedList(name)
+      listId = l.id
+      emit('update:activeId', listId)
+    }
+    let added = 0
+    let failed = 0
+    for (const item of parsed.items) {
+      if (!item.productId) continue
+      try {
+        await addToSharedList(listId, item.productId, item.quantity || 1)
+        added++
+      } catch {
+        failed++
+      }
+    }
+    await loadLists()
+    await selectList(listId)
+    jsonImportDialogVisible.value = false
+  } catch (e: any) {
+    jsonImportResult.value = `Error: ${e?.message || String(e)}`
+  } finally {
+    jsonImportBusy.value = false
+  }
 }
 
 defineExpose({ loadLists, refreshActive })
@@ -144,18 +281,41 @@ onMounted(loadLists)
       No shared lists yet. Create one and add products to share.
     </div>
 
-    <div v-else class="list-tabs">
-      <div
-        v-for="l in lists" :key="l.id"
-        class="list-tab" :class="{ active: activeList?.id === l.id }"
-        @click="selectList(l.id)"
-      >
-        <i class="pi pi-list" style="font-size: 0.8rem;"></i>
-        <span class="list-name">{{ l.name }}</span>
-        <span class="list-meta">({{ l.itemCount }} items)</span>
-        <i class="pi pi-trash action-icon red" @click.stop="doDelete(l.id)" title="Delete"></i>
+    <template v-else>
+      <div class="list-tabs">
+        <div
+          v-for="l in ownedLists()" :key="l.id"
+          class="list-tab" :class="{ active: activeList?.id === l.id }"
+          @click="selectList(l.id)"
+        >
+          <i class="pi pi-list" style="font-size: 0.8rem;"></i>
+          <span class="list-name">{{ l.name }}</span>
+          <i v-if="l.locked" class="pi pi-lock lock-icon" title="Locked"></i>
+          <span class="list-meta">({{ l.itemCount }} items, {{ l.total.toFixed(0) }} kr)</span>
+          <i class="pi pi-trash action-icon red" @click.stop="doDelete(l.id)" title="Delete"></i>
+        </div>
       </div>
-    </div>
+
+      <div v-if="sharedLists().length > 0">
+        <div class="section-label shared-section-label">
+          <i class="pi pi-users" style="font-size: 0.75rem"></i> Shared with me
+        </div>
+        <div class="list-tabs">
+          <div
+            v-for="l in sharedLists()" :key="l.id"
+            class="list-tab shared" :class="{ active: activeList?.id === l.id }"
+            @click="selectList(l.id)"
+          >
+            <i class="pi pi-users" style="font-size: 0.8rem; color: var(--purple);"></i>
+            <span class="list-name">{{ l.name }}</span>
+            <span class="shared-badge" :title="'Shared by ' + l.ownerName">{{ l.ownerName }}</span>
+            <i v-if="l.locked" class="pi pi-lock lock-icon" title="Locked"></i>
+            <span class="list-meta">({{ l.itemCount }} items, {{ l.total.toFixed(0) }} kr)</span>
+            <i class="pi pi-sign-out action-icon" @click.stop="leaveSharedList" title="Leave shared list" style="font-size: 0.7rem;"></i>
+          </div>
+        </div>
+      </div>
+    </template>
 
     <!-- Active list controls -->
     <div v-if="activeList" class="list-controls">
@@ -164,34 +324,28 @@ onMounted(loadLists)
         <code class="link-url">{{ getPublicUrl() }}</code>
         <Button :label="copied ? 'Copied!' : 'Copy'" :icon="copied ? 'pi pi-check' : 'pi pi-copy'" size="small" severity="secondary" @click="copyLink" />
         <Button label="Open" icon="pi pi-external-link" size="small" severity="secondary" @click="openPublicUrl" />
-        <Button label="Import Basket" icon="pi pi-shopping-cart" size="small" severity="secondary" @click="openImportDialog" />
+        <Button v-if="isOwner(activeList)" label="Share" icon="pi pi-share-alt" size="small" severity="secondary" @click="openShareDialog" />
+        <Button v-if="isOwner(activeList)" label="Rename" icon="pi pi-pencil" size="small" severity="secondary" @click="openRename" />
+        <Button v-if="canToggleLock(activeList)"
+          :label="activeList.locked ? 'Unlock' : 'Lock'"
+          :icon="activeList.locked ? 'pi pi-lock-open' : 'pi pi-lock'"
+          size="small"
+          :severity="activeList.locked ? 'warn' : 'secondary'"
+          @click="toggleLock"
+        />
+        <Button label="Export" icon="pi pi-upload" size="small" severity="secondary" @click="doExport" :disabled="!activeList?.items?.length" />
+        <Button label="Import" icon="pi pi-download" size="small" severity="secondary" @click="openJsonImport" :disabled="activeList.locked" />
+        <span v-if="activeList.locked" class="locked-badge">
+          <i class="pi pi-lock" style="font-size: 0.65rem"></i> Locked
+        </span>
+      </div>
+      <div v-if="activeList.sharedWith && activeList.sharedWith.length > 0" class="shared-with-list">
+        Shared with:
+        <span v-for="su in activeList.sharedWith" :key="su.userId" class="shared-chip">
+          {{ su.username }}
+        </span>
       </div>
     </div>
-
-    <!-- Import basket dialog -->
-    <Dialog v-model:visible="importDialogVisible" modal header="Import Basket to List" :style="{ width: '400px', maxWidth: '95vw' }">
-      <div class="import-dialog-body">
-        <p class="import-hint">
-          Import items from a basket into <strong>{{ activeList?.name }}</strong>.
-          Existing items will have their quantity updated. Items with no changes are skipped.
-        </p>
-        <div v-if="basketOptions.length === 0" class="empty-state">No baskets with items available.</div>
-        <template v-else>
-          <Select
-            v-model="selectedBasketId"
-            :options="basketOptions"
-            optionLabel="label"
-            optionValue="value"
-            placeholder="Select a basket..."
-            style="width: 100%;"
-          />
-          <div style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
-            <Button label="Import" icon="pi pi-download" size="small" :disabled="!selectedBasketId || importBusy" :loading="importBusy" @click="doImportBasket" />
-            <span v-if="importResult" class="import-result">{{ importResult }}</span>
-          </div>
-        </template>
-      </div>
-    </Dialog>
 
     <!-- Items table -->
     <div v-if="activeList && activeItems.length > 0">
@@ -204,9 +358,9 @@ onMounted(loadLists)
             <th>ABV%</th>
             <th>Volume</th>
             <th>Price</th>
-            <th>Qty</th>
+            <th style="width: 80px;">Qty</th>
             <th style="text-align: right;">Subtotal</th>
-            <th>Country</th>
+            <th>Added by</th>
             <th></th>
           </tr>
         </thead>
@@ -224,11 +378,17 @@ onMounted(loadLists)
             <td>{{ item.alcoholPercentage }}%</td>
             <td>{{ item.volumeText }}</td>
             <td>{{ item.price }} kr</td>
-            <td>{{ item.quantity }}</td>
-            <td style="text-align: right; font-weight: 600;">{{ (item.price * item.quantity).toFixed(1) }} kr</td>
-            <td class="text-muted">{{ item.country }}</td>
             <td>
-              <i class="pi pi-times action-icon red" @click="removeItem(item.productId)" title="Remove"></i>
+              <div class="qty-control">
+                <button class="qty-btn" :disabled="activeList?.locked" @click="updateQty(item.productId, item.quantity - 1)">-</button>
+                <span class="qty-val">{{ item.quantity }}</span>
+                <button class="qty-btn" :disabled="activeList?.locked" @click="updateQty(item.productId, item.quantity + 1)">+</button>
+              </div>
+            </td>
+            <td style="text-align: right; font-weight: 600;">{{ (item.price * item.quantity).toFixed(1) }} kr</td>
+            <td><span v-if="item.addedBy" class="added-by">{{ item.addedBy }}</span></td>
+            <td>
+              <i v-if="!activeList?.locked" class="pi pi-times action-icon red" @click="removeItem(item.productId)" title="Remove"></i>
             </td>
           </tr>
         </tbody>
@@ -245,6 +405,66 @@ onMounted(loadLists)
     <div v-else-if="activeList" class="empty-state">
       List is empty. Add products from the product table using the <i class="pi pi-list"></i> button.
     </div>
+
+    <!-- Export dialog -->
+    <Dialog v-model:visible="exportDialogVisible" modal header="Export List" :style="{ width: '500px', maxWidth: '95vw' }">
+      <div class="import-dialog-body">
+        <p class="import-hint">Copy this text and paste it on another system to import.</p>
+        <Textarea :modelValue="exportText" readonly autoResize style="width: 100%; font-family: monospace; font-size: 0.8rem;" rows="5" />
+        <div style="margin-top: 0.75rem;">
+          <Button :label="exportCopied ? 'Copied!' : 'Copy to clipboard'" :icon="exportCopied ? 'pi pi-check' : 'pi pi-copy'" size="small" @click="copyExportText" />
+        </div>
+      </div>
+    </Dialog>
+
+    <!-- Import JSON dialog -->
+    <Dialog v-model:visible="jsonImportDialogVisible" modal header="Import List" :style="{ width: '500px', maxWidth: '95vw' }">
+      <div class="import-dialog-body">
+        <p class="import-hint">
+          Paste an exported list JSON below.
+          {{ activeList ? `Items will be added to "${activeList.name}".` : 'A new list will be created.' }}
+        </p>
+        <Textarea v-model="jsonImportText" autoResize style="width: 100%; font-family: monospace; font-size: 0.8rem;" rows="5" placeholder='{"name":"...","items":[...]}' />
+        <div style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+          <Button label="Import" icon="pi pi-download" size="small" :disabled="!jsonImportText.trim() || jsonImportBusy" :loading="jsonImportBusy" @click="doJsonImport" />
+          <span v-if="jsonImportResult" class="import-result">{{ jsonImportResult }}</span>
+        </div>
+      </div>
+    </Dialog>
+
+    <!-- Share dialog -->
+    <Dialog v-model:visible="shareDialogVisible" modal header="Share List" :style="{ width: '360px', maxWidth: '95vw' }">
+      <div v-if="activeList" class="share-dialog-body">
+        <p class="share-dialog-hint">
+          Choose who can see and edit <strong>{{ activeList.name }}</strong>:
+        </p>
+        <div v-if="otherUsers().length === 0" class="empty-state">No other users to share with.</div>
+        <label
+          v-for="u in otherUsers()" :key="u.userId"
+          class="share-user-row"
+          :class="{ busy: shareBusy.has(u.userId) }"
+        >
+          <Checkbox
+            :modelValue="isSharedWith(u.userId)"
+            :binary="true"
+            :disabled="shareBusy.has(u.userId)"
+            @update:modelValue="toggleShare(u.userId)"
+          />
+          <span class="share-username">{{ u.username }}</span>
+          <span v-if="isSharedWith(u.userId)" class="share-status-on">Shared</span>
+        </label>
+      </div>
+    </Dialog>
+
+    <!-- Rename dialog -->
+    <Dialog v-model:visible="renameDialogVisible" modal header="Rename List" :style="{ width: '360px', maxWidth: '95vw' }">
+      <div class="import-dialog-body">
+        <InputText v-model="renameText" style="width: 100%;" @keyup.enter="doRename" />
+        <div style="margin-top: 0.75rem;">
+          <Button label="Rename" icon="pi pi-check" size="small" :disabled="!renameText.trim()" @click="doRename" />
+        </div>
+      </div>
+    </Dialog>
   </div>
 
 </template>
@@ -357,6 +577,159 @@ onMounted(loadLists)
 .import-result {
   font-size: 0.8rem;
   color: var(--text-secondary);
+}
+
+.section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 0.5rem 0 0.25rem 0;
+}
+
+.shared-section-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--purple, #9333ea);
+}
+
+.list-tab.shared {
+  border-color: var(--purple, #9333ea);
+  border-style: dashed;
+}
+
+.list-tab.shared:hover {
+  background: color-mix(in srgb, var(--purple, #9333ea) 8%, transparent);
+}
+
+.list-tab.shared.active {
+  background: color-mix(in srgb, var(--purple, #9333ea) 12%, transparent);
+  border-style: solid;
+}
+
+.shared-badge {
+  font-size: 0.7rem;
+  background: color-mix(in srgb, var(--purple, #9333ea) 15%, transparent);
+  color: var(--purple, #9333ea);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.shared-with-list {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.shared-chip {
+  background: color-mix(in srgb, var(--purple, #9333ea) 12%, transparent);
+  color: var(--purple, #9333ea);
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.share-dialog-body {
+  padding: 0.25rem 0;
+}
+
+.share-dialog-hint {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.share-user-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.25rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.share-user-row:hover {
+  background: var(--bg-muted);
+}
+
+.share-user-row.busy {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.share-username {
+  flex: 1;
+  font-size: 0.9rem;
+}
+
+.share-status-on {
+  font-size: 0.75rem;
+  color: var(--purple, #9333ea);
+  font-weight: 600;
+}
+
+.lock-icon {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.locked-badge {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.qty-control {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.qty-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+
+.qty-btn:hover:not(:disabled) {
+  background: var(--bg-muted);
+}
+
+.qty-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.qty-val {
+  min-width: 24px;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.added-by {
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .text-muted { color: var(--text-muted); }

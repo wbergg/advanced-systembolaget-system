@@ -33,9 +33,10 @@ type Product struct {
 	PackagingLevel1        string  `json:"packagingLevel1"`
 	Assortment             string  `json:"assortment"`
 	ProductLaunchDate      string  `json:"productLaunchDate"`
-	IsRegionalRestricted   bool    `json:"isRegionalRestricted"`
-	Vintage                *string `json:"vintage"`
-	ImageURL               string  `json:"imageUrl,omitempty"`
+	IsRegionalRestricted      bool    `json:"isRegionalRestricted"`
+	RestrictedParcelQuantity int     `json:"restrictedParcelQuantity"`
+	Vintage                  *string `json:"vintage"`
+	ImageURL                 string  `json:"imageUrl,omitempty"`
 }
 
 type RawProduct struct {
