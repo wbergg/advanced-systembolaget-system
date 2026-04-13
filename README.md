@@ -8,13 +8,15 @@ Built with Go (Gin), Vue 3 (PrimeVue), and SQLite.
 
 ### Docker (recommended)
 
-Create a `config.json`:
+Create a `config.json` (see `config_example.json`):
 
 ```json
 {
   "api_key": "",
   "admin_user": "admin",
-  "admin_pass": "changeme"
+  "admin_pass": "changeme",
+  "listen_ip": "0.0.0.0",
+  "port": "8080"
 }
 ```
 
@@ -43,7 +45,7 @@ Run the server:
 ./systemet-ass
 ```
 
-The server reads `config.json` for admin credentials and API key, creates a SQLite database in `data/`, and serves the frontend on port 8080 (override with `$PORT`).
+The server reads `config.json` for admin credentials, API key, and listen settings. It creates a SQLite database in `data/` and serves the frontend.
 
 ## Architecture
 
@@ -79,6 +81,21 @@ Organize tastings: create an event, invite users, add beers, and score each prod
 
 A game mode for events: add products to a pool, roll to randomly draw one, then accept or veto the pick. Each user gets one veto. Admins can undo vetoes/consumed items and reset the game.
 
+Only one roll event can be public at a time. Publishing an event makes it available at `/roll` without authentication. If no event is published, the page shows "Currently no active event."
+
+#### Public roll API
+
+The public roll endpoints require no authentication, so external apps can integrate with the game:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/public/roll` | Get game state, participants, and pending turn |
+| `POST` | `/api/public/roll` | Perform a roll (`{"userId": N}`) |
+| `POST` | `/api/public/roll/:turnId/accept` | Accept the pending roll |
+| `POST` | `/api/public/roll/:turnId/veto` | Veto the pending roll |
+
+`GET /api/public/roll` returns the event name, participant list, pool/consumed/vetoed counts, and the current pending turn (including `canVeto` to indicate whether the roll can be vetoed). Returns `404` when no event is published.
+
 ### Comments & notes
 
 Leave comments on products (visible to all users) and personal notes (visible only to you).
@@ -98,7 +115,7 @@ All endpoints are under `/api/`. Authentication uses JWT tokens (24h expiry).
 | Comments | `GET /products/:id/comments`, `POST /products/:id/comments` |
 | Sync | `POST /sync` (SSE), `POST /key/refresh`, `GET /key/status` |
 | Events | CRUD on `/events`, attendees, beers, scores, list import |
-| Roll game | `/events/:id/roll` (state, roll, accept, veto, reset) |
+| Roll game | `/events/:id/roll` (state, roll, accept, veto, reset), `/public/roll` (public access) |
 | Shared lists | CRUD on `/shared-lists`, items, locking, sharing, public view at `/public/shared-list/:uuid` |
 | Admin | `/admin/users` CRUD, `POST /admin/impersonate/:id`, `DELETE /admin/comments/:id`, `DELETE /admin/products` |
 
@@ -129,18 +146,22 @@ Add one line to `paramMappings` in `internal/systembolaget/params.go`:
 
 ## Configuration
 
-`config.json` in the working directory:
+`config.json` in the working directory (see `config_example.json`):
 
 ```json
 {
   "api_key": "",
   "admin_user": "admin",
-  "admin_pass": "changeme"
+  "admin_pass": "changeme",
+  "listen_ip": "0.0.0.0",
+  "port": "8080"
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `api_key` | Systembolaget API key (auto-fetched via `--get-key` or the web UI) |
-| `admin_user` | Initial admin username (seeded on first run) |
-| `admin_pass` | Initial admin password (hashed with bcrypt on seed) |
+| Field | Description | Default |
+|-------|-------------|---------|
+| `api_key` | Systembolaget API key (auto-fetched via `--get-key` or the web UI) | |
+| `admin_user` | Initial admin username (seeded on first run) | *required* |
+| `admin_pass` | Initial admin password (hashed with bcrypt on seed) | *required* |
+| `listen_ip` | IP address to bind to | `0.0.0.0` |
+| `port` | Port to listen on | `8080` |

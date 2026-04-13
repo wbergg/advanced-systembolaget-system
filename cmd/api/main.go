@@ -26,6 +26,8 @@ import (
 type AppConfig struct {
 	AdminUser string `json:"admin_user"`
 	AdminPass string `json:"admin_pass"`
+	ListenIP  string `json:"listen_ip"`
+	Port      string `json:"port"`
 }
 
 const (
@@ -45,6 +47,12 @@ func loadAppConfig(path string) (AppConfig, error) {
 	if cfg.AdminUser == "" || cfg.AdminPass == "" {
 		return AppConfig{}, fmt.Errorf("admin_user and admin_pass are required in %s", path)
 	}
+	if cfg.ListenIP == "" {
+		cfg.ListenIP = "0.0.0.0"
+	}
+	if cfg.Port == "" {
+		cfg.Port = "8080"
+	}
 	return cfg, nil
 }
 
@@ -57,11 +65,6 @@ func generateJWTSecret() string {
 }
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
 	appCfg, err := loadAppConfig(configFile)
 	if err != nil {
 		log.Fatalf("Config error: %v", err)
@@ -179,8 +182,9 @@ func main() {
 	}
 	r.NoRoute(gin.WrapH(spaHandler(http.FS(distFS))))
 
-	log.Printf("Starting server on :%s", port)
-	r.Run("0.0.0.0:" + port)
+	listenAddr := appCfg.ListenIP + ":" + appCfg.Port
+	log.Printf("Starting server on %s", listenAddr)
+	r.Run(listenAddr)
 }
 
 // spaHandler serves static files, falling back to index.html for SPA routes.
