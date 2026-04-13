@@ -15,6 +15,7 @@ type Event struct {
 	Locked        bool            `json:"locked"`
 	Type          string          `json:"type"`
 	Hidden        bool            `json:"hidden"`
+	Public        bool            `json:"public"`
 	CreatedAt     time.Time       `json:"createdAt"`
 	Attendees     []EventAttendee `json:"attendees,omitempty"`
 	Beers         []EventBeer     `json:"beers,omitempty"`
@@ -82,7 +83,7 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 	rows, err := db.conn.Query(`
 		SELECT e.id, e.name, e.description, e.event_date,
 			e.user_id, COALESCE(u.username, ''), e.locked,
-			e.type, e.hidden,
+			e.type, e.hidden, e.public,
 			e.created_at,
 			(SELECT COUNT(*) FROM event_attendees WHERE event_id = e.id) AS attendee_count,
 			CASE WHEN e.type = 'roll'
@@ -105,7 +106,7 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 		var ev Event
 		if err := rows.Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
 			&ev.OwnerID, &ev.OwnerName, &ev.Locked,
-			&ev.Type, &ev.Hidden,
+			&ev.Type, &ev.Hidden, &ev.Public,
 			&ev.CreatedAt,
 			&ev.AttendeeCount, &ev.BeerCount); err != nil {
 			return nil, err
@@ -151,13 +152,13 @@ func (db *DB) GetEvent(id, userID int, isAdmin bool) (*Event, error) {
 	err := db.conn.QueryRow(`
 		SELECT e.id, e.name, e.description, e.event_date,
 			e.user_id, COALESCE(u.username, ''), e.locked,
-			e.type, e.hidden,
+			e.type, e.hidden, e.public,
 			e.created_at
 		FROM events e LEFT JOIN users u ON e.user_id = u.id
 		WHERE e.id = ?
 	`, id).Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
 		&ev.OwnerID, &ev.OwnerName, &ev.Locked,
-		&ev.Type, &ev.Hidden,
+		&ev.Type, &ev.Hidden, &ev.Public,
 		&ev.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -424,4 +425,75 @@ func (db *DB) DeleteScore(eventBeerID, userID int) error {
 	}
 	_, err = db.conn.Exec("DELETE FROM event_scores WHERE event_beer_id = ? AND user_id = ?", eventBeerID, userID)
 	return err
+}
+
+func (db *DB) ToggleEventPublic(eventID, callerUserID int, isAdmin bool) (bool, error) {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	if err != nil {
+		return false, fmt.Errorf("event not found")
+	}
+	if ownerID != callerUserID && !isAdmin {
+		return false, fmt.Errorf("only the owner or admin can toggle public access")
+	}
+
+	var current bool
+	db.conn.QueryRow("SELECT public FROM events WHERE id = ?", eventID).Scan(&current)
+	if current {
+		// Disable public access
+		_, err = db.conn.Exec("UPDATE events SET public = 0 WHERE id = ?", eventID)
+		return false, err
+	}
+
+	// Check if another event is already public
+	var otherID int
+	var otherName string
+	err = db.conn.QueryRow("SELECT id, name FROM events WHERE public = 1 AND id != ?", eventID).Scan(&otherID, &otherName)
+	if err == nil {
+		return false, fmt.Errorf("event '%s' is already public, disable it first", otherName)
+	}
+
+	// Enable public access
+	_, err = db.conn.Exec("UPDATE events SET public = 1 WHERE id = ?", eventID)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (db *DB) GetPublicEvent() (*Event, error) {
+	var ev Event
+	err := db.conn.QueryRow(`
+		SELECT e.id, e.name, e.description, e.event_date,
+			e.user_id, COALESCE(u.username, ''), e.locked,
+			e.type, e.hidden, e.public, e.created_at
+		FROM events e LEFT JOIN users u ON e.user_id = u.id
+		WHERE e.public = 1 AND e.type = 'roll'
+	`).Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
+		&ev.OwnerID, &ev.OwnerName, &ev.Locked,
+		&ev.Type, &ev.Hidden, &ev.Public, &ev.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("no active public event")
+	}
+
+	// Load attendees
+	attRows, err := db.conn.Query(`
+		SELECT ea.user_id, u.username
+		FROM event_attendees ea JOIN users u ON ea.user_id = u.id
+		WHERE ea.event_id = ?
+	`, ev.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer attRows.Close()
+	for attRows.Next() {
+		var a EventAttendee
+		if err := attRows.Scan(&a.UserID, &a.Username); err != nil {
+			return nil, err
+		}
+		ev.Attendees = append(ev.Attendees, a)
+	}
+	ev.AttendeeCount = len(ev.Attendees)
+
+	return &ev, nil
 }

@@ -181,5 +181,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
 			PRIMARY KEY (list_id, user_id)
 		);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migration: add public_token to events (legacy)
+	conn.Exec("ALTER TABLE events ADD COLUMN public_token TEXT")
+	conn.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_public_token ON events(public_token)")
+
+	// Migration: add public flag to events (replaces public_token)
+	conn.Exec("ALTER TABLE events ADD COLUMN public INTEGER NOT NULL DEFAULT 0")
+	conn.Exec("UPDATE events SET public = 1 WHERE public_token IS NOT NULL AND public_token != ''")
+
+	return nil
 }

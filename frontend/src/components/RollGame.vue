@@ -4,6 +4,7 @@ import Button from 'primevue/button'
 import Select from 'primevue/select'
 import {
   getRollState, performRoll, acceptRoll, vetoRoll, resetRoll, undoConsumed, undoVeto,
+  getPublicRoll, publicPerformRoll, publicAcceptRoll, publicVetoRoll,
   type RollState,
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -11,6 +12,7 @@ import { useAuthStore } from '../stores/auth'
 const props = defineProps<{
   eventId: number
   participants: { userId: number; username: string }[]
+  isPublic?: boolean
 }>()
 
 const authStore = useAuthStore()
@@ -23,7 +25,12 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 
 async function loadState() {
   try {
-    state.value = await getRollState(props.eventId)
+    if (props.isPublic) {
+      const data = await getPublicRoll()
+      state.value = data.state
+    } else {
+      state.value = await getRollState(props.eventId)
+    }
     error.value = ''
   } catch (e: any) {
     error.value = e.message
@@ -35,7 +42,11 @@ async function doRoll() {
   rolling.value = true
   error.value = ''
   try {
-    await performRoll(props.eventId, selectedUser.value.userId)
+    if (props.isPublic) {
+      await publicPerformRoll(selectedUser.value.userId)
+    } else {
+      await performRoll(props.eventId, selectedUser.value.userId)
+    }
     await loadState()
   } catch (e: any) {
     error.value = e.message
@@ -49,7 +60,11 @@ async function doAccept() {
   acting.value = true
   error.value = ''
   try {
-    await acceptRoll(props.eventId, state.value.pendingTurn.id)
+    if (props.isPublic) {
+      await publicAcceptRoll(state.value.pendingTurn.id)
+    } else {
+      await acceptRoll(props.eventId, state.value.pendingTurn.id)
+    }
     await loadState()
   } catch (e: any) {
     error.value = e.message
@@ -63,7 +78,11 @@ async function doVeto() {
   acting.value = true
   error.value = ''
   try {
-    await vetoRoll(props.eventId, state.value.pendingTurn.id)
+    if (props.isPublic) {
+      await publicVetoRoll(state.value.pendingTurn.id)
+    } else {
+      await vetoRoll(props.eventId, state.value.pendingTurn.id)
+    }
     await loadState()
   } catch (e: any) {
     error.value = e.message
@@ -114,7 +133,7 @@ async function doReset() {
   }
 }
 
-const isAdmin = computed(() => authStore.user?.role === 'admin')
+const isAdmin = computed(() => !props.isPublic && authStore.user?.role === 'admin')
 const progressPct = computed(() => {
   if (!state.value || state.value.totalCount === 0) return 0
   return Math.round(((state.value.totalCount - state.value.poolCount) / state.value.totalCount) * 100)

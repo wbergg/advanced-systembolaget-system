@@ -124,6 +124,7 @@ func main() {
 			authed.DELETE("/events/:id/scores/:beerId", deleteScoreHandler(database))
 
 			// Roll game
+			authed.PATCH("/events/:id/public", toggleEventPublicHandler(database))
 			authed.PATCH("/events/:id/visibility", setEventHiddenHandler(database))
 			authed.GET("/events/:id/roll", getRollStateHandler(database))
 			authed.POST("/events/:id/roll", performRollHandler(database))
@@ -149,6 +150,12 @@ func main() {
 
 		// Public shared list endpoint (no auth)
 		api.GET("/public/shared-list/:uuid", getPublicSharedList(database))
+
+		// Public roll endpoints (no auth)
+		api.GET("/public/roll", getPublicRollHandler(database))
+		api.POST("/public/roll", publicPerformRollHandler(database))
+		api.POST("/public/roll/:turnId/accept", publicAcceptRollHandler(database))
+		api.POST("/public/roll/:turnId/veto", publicVetoRollHandler(database))
 
 		// Admin
 		admin := api.Group("/admin")
@@ -1193,6 +1200,110 @@ func getPublicSharedList(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, l)
+	}
+}
+
+func toggleEventPublicHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
+			return
+		}
+		isPublic, err := database.ToggleEventPublic(id, claims.UserID, claims.Role == "admin")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"public": isPublic})
+	}
+}
+
+func getPublicRollHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ev, err := database.GetPublicEvent()
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no active public event"})
+			return
+		}
+		state, err := database.GetRollState(ev.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		participants := []gin.H{{"userId": ev.OwnerID, "username": ev.OwnerName}}
+		for _, a := range ev.Attendees {
+			participants = append(participants, gin.H{"userId": a.UserID, "username": a.Username})
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"eventName":    ev.Name,
+			"state":        state,
+			"participants": participants,
+		})
+	}
+}
+
+func publicPerformRollHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ev, err := database.GetPublicEvent()
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no active public event"})
+			return
+		}
+		var body struct {
+			UserID int `json:"userId"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.UserID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "userId is required"})
+			return
+		}
+		turn, err := database.PerformRoll(ev.ID, body.UserID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, turn)
+	}
+}
+
+func publicAcceptRollHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ev, err := database.GetPublicEvent()
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no active public event"})
+			return
+		}
+		turnID, err := strconv.Atoi(c.Param("turnId"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid turn id"})
+			return
+		}
+		if err := database.AcceptRoll(ev.ID, turnID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func publicVetoRollHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ev, err := database.GetPublicEvent()
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no active public event"})
+			return
+		}
+		turnID, err := strconv.Atoi(c.Param("turnId"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid turn id"})
+			return
+		}
+		if err := database.VetoRoll(ev.ID, turnID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 

@@ -5,6 +5,7 @@ import ApiKeyStatus from './components/ApiKeyStatus.vue'
 import EventsPage from './components/EventsPage.vue'
 import SharedListsPage from './components/SharedListsPage.vue'
 import SharedListView from './components/SharedListView.vue'
+import PublicRollView from './components/PublicRollView.vue'
 import LoginForm from './components/LoginForm.vue'
 import AdminPanel from './components/AdminPanel.vue'
 import ChangePassword from './components/ChangePassword.vue'
@@ -20,6 +21,9 @@ const pathMatch = window.location.pathname.match(/^\/delad-lista\/([a-f0-9-]+)$/
 if (pathMatch) {
   sharedListUUID.value = pathMatch[1]
 }
+
+// Check if this is a public roll page
+const isPublicRollPage = /^\/roll\/?$/.test(window.location.pathname)
 
 const showSync = ref(false)
 const showEvents = ref(false)
@@ -95,8 +99,11 @@ function onSynced() {
 </script>
 
 <template>
+  <!-- Public roll page (no auth needed) -->
+  <PublicRollView v-if="isPublicRollPage" />
+
   <!-- Public shared list page (no auth needed) -->
-  <SharedListView v-if="sharedListUUID" :uuid="sharedListUUID" />
+  <SharedListView v-else-if="sharedListUUID" :uuid="sharedListUUID" />
 
   <template v-else-if="authStore.isLoggedIn">
     <div v-if="authStore.isImpersonating" class="impersonation-banner">

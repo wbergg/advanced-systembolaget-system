@@ -321,6 +321,7 @@ export interface Event {
   locked: boolean
   type: 'tasting' | 'roll'
   hidden: boolean
+  public?: boolean
   createdAt: string
   attendees?: EventAttendee[]
   beers?: EventBeer[]
@@ -663,4 +664,43 @@ export async function setEventHidden(eventId: number, hidden: boolean): Promise<
     body: JSON.stringify({ hidden }),
   })
   if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to update visibility') }
+}
+
+export async function toggleEventPublic(eventId: number): Promise<{ public: boolean }> {
+  const res = await authFetch(`/api/events/${eventId}/public`, { method: 'PATCH' })
+  if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to toggle public') }
+  return res.json()
+}
+
+// Public roll endpoints (no auth)
+export interface PublicRollData {
+  eventName: string
+  state: RollState
+  participants: { userId: number; username: string }[]
+}
+
+export async function getPublicRoll(): Promise<PublicRollData> {
+  const res = await fetch('/api/public/roll')
+  if (!res.ok) throw new Error('Roll not found')
+  return res.json()
+}
+
+export async function publicPerformRoll(userId: number): Promise<RollTurn> {
+  const res = await fetch('/api/public/roll', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  })
+  if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to roll') }
+  return res.json()
+}
+
+export async function publicAcceptRoll(turnId: number): Promise<void> {
+  const res = await fetch(`/api/public/roll/${turnId}/accept`, { method: 'POST' })
+  if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to accept') }
+}
+
+export async function publicVetoRoll(turnId: number): Promise<void> {
+  const res = await fetch(`/api/public/roll/${turnId}/veto`, { method: 'POST' })
+  if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to veto') }
 }

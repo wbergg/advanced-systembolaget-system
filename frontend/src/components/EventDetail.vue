@@ -9,7 +9,7 @@ import { useAuthStore } from '../stores/auth'
 import {
   getEvent, setEventLocked, inviteToEvent, uninviteFromEvent,
   importSharedListToEvent, removeBeerFromEvent, setScore, deleteScore,
-  listAllUsers, listSharedLists, setEventHidden,
+  listAllUsers, listSharedLists, setEventHidden, toggleEventPublic,
   type Event, type EventBeer, type ShareUser, type SharedList
 } from '../api/client'
 
@@ -50,6 +50,21 @@ async function toggleHidden() {
   if (!event.value) return
   await setEventHidden(event.value.id, !event.value.hidden)
   await loadEvent()
+}
+
+async function togglePublic() {
+  if (!event.value) return
+  await toggleEventPublic(event.value.id)
+  await loadEvent()
+}
+
+const publicUrl = computed(() => {
+  if (!event.value?.public) return null
+  return `${window.location.origin}/roll`
+})
+
+function copyPublicUrl() {
+  if (publicUrl.value) navigator.clipboard.writeText(publicUrl.value)
 }
 
 // All participants = owner + attendees
@@ -201,6 +216,7 @@ onMounted(loadEvent)
           </span>
         </div>
         <div class="detail-actions">
+          <Button v-if="isRoll && (isAdminUser || isOwner())" :label="event.public ? 'Unpublish' : 'Publish'" icon="pi pi-globe" size="small" :severity="event.public ? 'success' : 'secondary'" @click="togglePublic" />
           <Button v-if="isRoll && isAdminUser" :label="event.hidden ? 'Reveal' : 'Hide'" :icon="event.hidden ? 'pi pi-eye' : 'pi pi-eye-slash'" size="small" :severity="event.hidden ? 'success' : 'warn'" @click="toggleHidden" />
           <Button v-if="canEdit()" :label="event.locked ? 'Unlock' : 'Lock'" :icon="event.locked ? 'pi pi-lock-open' : 'pi pi-lock'" size="small" :severity="event.locked ? 'warn' : 'secondary'" @click="toggleLock" />
           <Button v-if="isOwner()" label="Invite" icon="pi pi-user-plus" size="small" severity="secondary" @click="openInviteDialog" />
@@ -216,6 +232,15 @@ onMounted(loadEvent)
 
       <div v-if="event.locked" class="locked-banner">
         <i class="pi pi-lock"></i> Event is locked — scoring is closed.
+      </div>
+
+      <div v-if="publicUrl" class="public-banner">
+        <i class="pi pi-globe"></i>
+        Public link:
+        <a :href="publicUrl" target="_blank" class="public-link">{{ publicUrl }}</a>
+        <button class="copy-btn" @click="copyPublicUrl" title="Copy link">
+          <i class="pi pi-copy"></i>
+        </button>
       </div>
 
       <!-- Attendees summary -->
@@ -373,6 +398,39 @@ onMounted(loadEvent)
   margin-bottom: 0.75rem;
   font-size: 0.85rem;
   font-weight: 500;
+}
+
+.public-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #7dd3fc;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.public-link {
+  color: #0369a1;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.copy-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #0369a1;
+  padding: 0.2rem;
+  margin-left: 0.25rem;
+}
+
+.copy-btn:hover {
+  color: #075985;
 }
 
 .attendee-chips {
