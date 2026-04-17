@@ -10,6 +10,7 @@ import {
   getEvent, setEventLocked, inviteToEvent, uninviteFromEvent,
   importSharedListToEvent, removeBeerFromEvent, setScore, deleteScore,
   listAllUsers, listSharedLists, setEventHidden, toggleEventPublic,
+  deleteEvent,
   type Event, type EventBeer, type ShareUser, type SharedList
 } from '../api/client'
 
@@ -103,6 +104,13 @@ async function toggleLock() {
   if (!event.value) return
   await setEventLocked(event.value.id, !event.value.locked)
   await loadEvent()
+}
+
+async function doDeleteEvent() {
+  if (!event.value) return
+  if (!confirm(`Delete event "${event.value.name}"? This cannot be undone.`)) return
+  await deleteEvent(event.value.id)
+  emit('back')
 }
 
 // Invite
@@ -216,11 +224,12 @@ onMounted(loadEvent)
           </span>
         </div>
         <div class="detail-actions">
-          <Button v-if="isRoll && (isAdminUser || isOwner())" :label="event.public ? 'Unpublish' : 'Publish'" icon="pi pi-globe" size="small" :severity="event.public ? 'success' : 'secondary'" @click="togglePublic" />
+          <Button v-if="isRoll && isAdminUser" :label="event.public ? 'Unpublish' : 'Publish'" icon="pi pi-globe" size="small" :severity="event.public ? 'success' : 'secondary'" @click="togglePublic" />
           <Button v-if="isRoll && isAdminUser" :label="event.hidden ? 'Reveal' : 'Hide'" :icon="event.hidden ? 'pi pi-eye' : 'pi pi-eye-slash'" size="small" :severity="event.hidden ? 'success' : 'warn'" @click="toggleHidden" />
           <Button v-if="canEdit()" :label="event.locked ? 'Unlock' : 'Lock'" :icon="event.locked ? 'pi pi-lock-open' : 'pi pi-lock'" size="small" :severity="event.locked ? 'warn' : 'secondary'" @click="toggleLock" />
           <Button v-if="isOwner()" label="Invite" icon="pi pi-user-plus" size="small" severity="secondary" @click="openInviteDialog" />
           <Button v-if="canEdit() && !event.locked" label="Import List" icon="pi pi-download" size="small" severity="secondary" @click="openImportDialog" />
+          <Button v-if="canEdit()" label="Delete" icon="pi pi-trash" size="small" severity="danger" @click="doDeleteEvent" />
         </div>
       </div>
 
@@ -250,7 +259,7 @@ onMounted(loadEvent)
       </div>
 
       <!-- Roll game (for roll events) -->
-      <RollGame v-if="isRoll" :eventId="event.id" :participants="participants" />
+      <RollGame v-if="isRoll" :eventId="event.id" :participants="participants" :canEdit="canEdit()" />
 
       <!-- Scoring matrix (for tasting events) -->
       <div v-else-if="(event.beers || []).length > 0" class="matrix-wrapper">

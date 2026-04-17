@@ -496,11 +496,7 @@ func createEventHandler(database *db.DB) gin.HandlerFunc {
 		if body.Type == "" {
 			body.Type = "tasting"
 		}
-		if body.Type == "roll" && claims.Role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "only admins can create roll events"})
-			return
-		}
-		ev, err := database.CreateEvent(body.Name, body.Description, body.EventDate, claims.UserID, body.Type)
+		ev, err := database.CreateEvent(body.Name, body.Description, body.EventDate, claims.UserID, body.Type, claims.Role == "admin")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -559,7 +555,7 @@ func deleteEventHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
 			return
 		}
-		if err := database.DeleteEvent(id, claims.UserID); err != nil {
+		if err := database.DeleteEvent(id, claims.UserID, claims.Role == "admin"); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
@@ -889,16 +885,29 @@ func vetoRollHandler(database *db.DB) gin.HandlerFunc {
 	}
 }
 
+func requireOwnerOrAdmin(c *gin.Context, database *db.DB, eventID int) bool {
+	claims := auth.ClaimsFromContext(c)
+	isAdmin := claims.Role == "admin"
+	isOwner, err := database.CanAccessEvent(eventID, claims.UserID, isAdmin)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
+		return false
+	}
+	if !isAdmin && !isOwner {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only the host or an admin can alter the roll game"})
+		return false
+	}
+	return true
+}
+
 func undoVetoHandler(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		if claims.Role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
-			return
-		}
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
+			return
+		}
+		if !requireOwnerOrAdmin(c, database, id) {
 			return
 		}
 		poolID, err := strconv.Atoi(c.Param("poolId"))
@@ -916,14 +925,12 @@ func undoVetoHandler(database *db.DB) gin.HandlerFunc {
 
 func undoConsumedHandler(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		if claims.Role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
-			return
-		}
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
+			return
+		}
+		if !requireOwnerOrAdmin(c, database, id) {
 			return
 		}
 		poolID, err := strconv.Atoi(c.Param("poolId"))
@@ -941,14 +948,12 @@ func undoConsumedHandler(database *db.DB) gin.HandlerFunc {
 
 func resetRollHandler(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		claims := auth.ClaimsFromContext(c)
-		if claims.Role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
-			return
-		}
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
+			return
+		}
+		if !requireOwnerOrAdmin(c, database, id) {
 			return
 		}
 		if err := database.ResetRoll(id); err != nil {
@@ -1215,7 +1220,7 @@ func toggleEventPublicHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
 			return
 		}
-		isPublic, err := database.ToggleEventPublic(id, claims.UserID, claims.Role == "admin")
+		isPublic, err := database.ToggleEventPublic(id, claims.Role == "admin")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

@@ -80,7 +80,7 @@ onMounted(loadEvents)
         <InputText v-model="newName" placeholder="Event name..." size="small" @keyup.enter="doCreate" style="flex: 2;" />
         <InputText v-model="newDate" placeholder="Date (e.g. 2026-04-10)" size="small" style="flex: 1;" />
       </div>
-      <div v-if="isAdmin" class="event-create-row">
+      <div class="event-create-row">
         <label class="type-toggle">
           <input type="radio" value="tasting" v-model="newType" /> Tasting
         </label>
@@ -129,6 +129,7 @@ onMounted(loadEvents)
             <span class="event-card-name">{{ ev.name }}</span>
             <span class="owner-badge">{{ ev.ownerName }}</span>
             <i v-if="ev.locked" class="pi pi-lock" style="color: var(--warning); font-size: 0.75rem;" title="Locked"></i>
+            <i v-if="isAdmin" class="pi pi-trash action-icon red" @click.stop="doDelete(ev.id)" title="Delete"></i>
           </div>
           <div class="event-card-meta">
             <span v-if="ev.eventDate"><i class="pi pi-calendar"></i> {{ ev.eventDate }}</span>

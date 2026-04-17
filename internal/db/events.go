@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -92,10 +93,12 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 			END AS beer_count
 		FROM events e
 		LEFT JOIN users u ON e.user_id = u.id
-		WHERE (e.user_id = ? OR e.id IN (SELECT event_id FROM event_attendees WHERE user_id = ?))
+		WHERE (? = 1
+		       OR e.user_id = ?
+		       OR e.id IN (SELECT event_id FROM event_attendees WHERE user_id = ?))
 		  AND (e.hidden = 0 OR ? = 1)
 		ORDER BY e.created_at DESC
-	`, userID, userID, adminVal)
+	`, adminVal, userID, userID, adminVal)
 	if err != nil {
 		return nil, err
 	}
@@ -116,12 +119,12 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 	return events, rows.Err()
 }
 
-func (db *DB) CreateEvent(name, description, eventDate string, userID int, eventType string) (*Event, error) {
+func (db *DB) CreateEvent(name, description, eventDate string, userID int, eventType string, hiddenByDefault bool) (*Event, error) {
 	if eventType == "" {
 		eventType = "tasting"
 	}
 	hidden := 0
-	if eventType == "roll" {
+	if eventType == "roll" && hiddenByDefault {
 		hidden = 1
 	}
 
@@ -254,8 +257,14 @@ func (db *DB) UpdateEvent(id int, name, description, eventDate string, userID in
 	return nil
 }
 
-func (db *DB) DeleteEvent(id, userID int) error {
-	res, err := db.conn.Exec("DELETE FROM events WHERE id = ? AND user_id = ?", id, userID)
+func (db *DB) DeleteEvent(id, userID int, isAdmin bool) error {
+	var res sql.Result
+	var err error
+	if isAdmin {
+		res, err = db.conn.Exec("DELETE FROM events WHERE id = ?", id)
+	} else {
+		res, err = db.conn.Exec("DELETE FROM events WHERE id = ? AND user_id = ?", id, userID)
+	}
 	if err != nil {
 		return err
 	}
@@ -427,14 +436,14 @@ func (db *DB) DeleteScore(eventBeerID, userID int) error {
 	return err
 }
 
-func (db *DB) ToggleEventPublic(eventID, callerUserID int, isAdmin bool) (bool, error) {
-	var ownerID int
-	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+func (db *DB) ToggleEventPublic(eventID int, isAdmin bool) (bool, error) {
+	if !isAdmin {
+		return false, fmt.Errorf("only an admin can toggle public access")
+	}
+	var exists int
+	err := db.conn.QueryRow("SELECT 1 FROM events WHERE id = ?", eventID).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("event not found")
-	}
-	if ownerID != callerUserID && !isAdmin {
-		return false, fmt.Errorf("only the owner or admin can toggle public access")
 	}
 
 	var current bool

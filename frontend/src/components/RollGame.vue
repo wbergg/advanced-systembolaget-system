@@ -13,6 +13,7 @@ const props = defineProps<{
   eventId: number
   participants: { userId: number; username: string }[]
   isPublic?: boolean
+  canEdit?: boolean
 }>()
 
 const authStore = useAuthStore()
@@ -134,6 +135,7 @@ async function doReset() {
 }
 
 const isAdmin = computed(() => !props.isPublic && authStore.user?.role === 'admin')
+const canManage = computed(() => !props.isPublic && (isAdmin.value || !!props.canEdit))
 const progressPct = computed(() => {
   if (!state.value || state.value.totalCount === 0) return 0
   return Math.round(((state.value.totalCount - state.value.poolCount) / state.value.totalCount) * 100)
@@ -251,8 +253,8 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Admin reset -->
-    <div v-if="isAdmin" class="admin-section">
+    <!-- Host/admin reset -->
+    <div v-if="canManage" class="admin-section">
       <Button label="Reset Game" icon="pi pi-refresh" severity="secondary" size="small" @click="doReset" :disabled="acting" />
     </div>
 
@@ -274,7 +276,7 @@ onUnmounted(() => {
               vetoed by <strong>{{ item.vetoedByName }}</strong> — {{ formatDate(item.vetoedAt) }}
             </span>
           </div>
-          <i v-if="isAdmin" class="pi pi-undo consumed-undo" title="Undo veto — restore veto allowance" @click="doUndoVeto(item.poolId)"></i>
+          <i v-if="canManage" class="pi pi-undo consumed-undo" title="Undo veto — restore veto allowance" @click="doUndoVeto(item.poolId)"></i>
         </div>
       </div>
     </div>
@@ -297,7 +299,7 @@ onUnmounted(() => {
               consumed by <strong>{{ item.consumedByName }}</strong> — {{ formatDate(item.consumedAt) }}
             </span>
           </div>
-          <i v-if="isAdmin" class="pi pi-undo consumed-undo" title="Undo — put back in pool" @click="doUndo(item.id)"></i>
+          <i v-if="canManage" class="pi pi-undo consumed-undo" title="Undo — put back in pool" @click="doUndo(item.id)"></i>
         </div>
       </div>
     </div>
