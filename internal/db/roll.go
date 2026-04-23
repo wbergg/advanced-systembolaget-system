@@ -13,6 +13,7 @@ type RollPoolItem struct {
 	ProductNameBold string  `json:"productNameBold"`
 	ProductNameThin *string `json:"productNameThin"`
 	ProducerName    string  `json:"producerName"`
+	Country         string  `json:"country"`
 	ImageURL        string  `json:"imageUrl"`
 	Consumed        bool    `json:"consumed"`
 	ConsumedByUID   *int    `json:"consumedByUserId,omitempty"`
@@ -30,6 +31,7 @@ type RollTurn struct {
 	ProductNameBold string  `json:"productNameBold"`
 	ProductNameThin *string `json:"productNameThin"`
 	ProducerName    string  `json:"producerName"`
+	Country         string  `json:"country"`
 	ImageURL        string  `json:"imageUrl"`
 	Status          string  `json:"status"`
 	CanVeto         bool    `json:"canVeto"`
@@ -42,6 +44,7 @@ type VetoedItem struct {
 	ProductNameBold string  `json:"productNameBold"`
 	ProductNameThin *string `json:"productNameThin"`
 	ProducerName    string  `json:"producerName"`
+	Country         string  `json:"country"`
 	ImageURL        string  `json:"imageUrl"`
 	VetoedByName    string  `json:"vetoedByName"`
 	VetoedAt        string  `json:"vetoedAt"`
@@ -74,7 +77,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 
 	// Consumed items
 	rows, err := db.conn.Query(`
-		SELECT rp.id, rp.product_id, p.name_bold, p.name_thin, p.producer_name, COALESCE(p.image_url, ''),
+		SELECT rp.id, rp.product_id, p.name_bold, p.name_thin, p.producer_name, p.country, COALESCE(p.image_url, ''),
 			rp.consumed_by, u.username, rp.consumed_at, rp.vetoed
 		FROM roll_pool rp
 		JOIN products p ON rp.product_id = p.product_id
@@ -90,7 +93,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 		var item RollPoolItem
 		item.Consumed = true
 		if err := rows.Scan(&item.ID, &item.ProductID, &item.ProductNameBold, &item.ProductNameThin,
-			&item.ProducerName, &item.ImageURL,
+			&item.ProducerName, &item.Country, &item.ImageURL,
 			&item.ConsumedByUID, &item.ConsumedByName, &item.ConsumedAt, &item.Vetoed); err != nil {
 			return nil, err
 		}
@@ -99,7 +102,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 
 	// Vetoed items (pool entries that were vetoed and are back in the pool)
 	vetoRows, err := db.conn.Query(`
-		SELECT rp.id, p.name_bold, p.name_thin, p.producer_name, COALESCE(p.image_url, ''),
+		SELECT rp.id, p.name_bold, p.name_thin, p.producer_name, p.country, COALESCE(p.image_url, ''),
 			u.username, rt.resolved_at
 		FROM roll_turns rt
 		JOIN roll_pool rp ON rt.pool_id = rp.id
@@ -115,7 +118,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 	for vetoRows.Next() {
 		var v VetoedItem
 		if err := vetoRows.Scan(&v.PoolID, &v.ProductNameBold, &v.ProductNameThin,
-			&v.ProducerName, &v.ImageURL, &v.VetoedByName, &v.VetoedAt); err != nil {
+			&v.ProducerName, &v.Country, &v.ImageURL, &v.VetoedByName, &v.VetoedAt); err != nil {
 			return nil, err
 		}
 		state.Vetoed = append(state.Vetoed, v)
@@ -128,7 +131,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 	var userVetoCount int
 	pendingErr := db.conn.QueryRow(`
 		SELECT rt.id, rt.event_id, rt.pool_id, rt.user_id, u.username,
-			p.name_bold, p.name_thin, p.producer_name, COALESCE(p.image_url, ''),
+			p.name_bold, p.name_thin, p.producer_name, p.country, COALESCE(p.image_url, ''),
 			rt.status, rt.created_at, rt.resolved_at,
 			rp.vetoed,
 			(SELECT COUNT(*) FROM roll_turns rt2
@@ -141,7 +144,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 		WHERE rt.event_id = ? AND rt.status = 'pending'
 		LIMIT 1
 	`, eventID).Scan(&turn.ID, &turn.EventID, &turn.PoolID, &turn.UserID, &turn.Username,
-		&turn.ProductNameBold, &turn.ProductNameThin, &turn.ProducerName, &turn.ImageURL,
+		&turn.ProductNameBold, &turn.ProductNameThin, &turn.ProducerName, &turn.Country, &turn.ImageURL,
 		&turn.Status, &turn.CreatedAt, &resolvedAt,
 		&poolVetoed, &userVetoCount)
 	if pendingErr == nil {
@@ -266,8 +269,8 @@ func (db *DB) PerformRoll(eventID, targetUserID int) (*RollTurn, error) {
 	if err := db.conn.QueryRow("SELECT username FROM users WHERE id = ?", targetUserID).Scan(&turn.Username); err != nil {
 		return nil, fmt.Errorf("fetch username: %w", err)
 	}
-	if err := db.conn.QueryRow("SELECT name_bold, name_thin, producer_name, COALESCE(image_url, '') FROM products WHERE product_id = ?",
-		picked.productID).Scan(&turn.ProductNameBold, &turn.ProductNameThin, &turn.ProducerName, &turn.ImageURL); err != nil {
+	if err := db.conn.QueryRow("SELECT name_bold, name_thin, producer_name, country, COALESCE(image_url, '') FROM products WHERE product_id = ?",
+		picked.productID).Scan(&turn.ProductNameBold, &turn.ProductNameThin, &turn.ProducerName, &turn.Country, &turn.ImageURL); err != nil {
 		return nil, fmt.Errorf("fetch product: %w", err)
 	}
 
