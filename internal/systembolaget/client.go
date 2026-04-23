@@ -37,6 +37,21 @@ func LoadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
+// LoadPrinterConfig reads only the printer section from config.json, ignoring
+// whether api_key is set. Returns a zero-value PrinterConfig if the file is
+// missing or unparseable.
+func LoadPrinterConfig(path string) PrinterConfig {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return PrinterConfig{}
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return PrinterConfig{}
+	}
+	return cfg.Printer
+}
+
 func SaveConfig(path string, cfg Config) error {
 	existing := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {

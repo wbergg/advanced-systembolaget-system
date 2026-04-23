@@ -17,6 +17,7 @@ import (
 	"advanced-systembolaget-system/internal/auth"
 	"advanced-systembolaget-system/internal/db"
 	"advanced-systembolaget-system/internal/handlers"
+	"advanced-systembolaget-system/internal/printer"
 	"advanced-systembolaget-system/internal/systembolaget"
 
 	"github.com/gin-contrib/cors"
@@ -82,6 +83,13 @@ func main() {
 		log.Fatalf("Failed to seed admin: %v", err)
 	}
 
+	pc := systembolaget.LoadPrinterConfig(configFile)
+	printerCfg := printer.Config{Enabled: pc.Enabled, URL: pc.URL}
+	printerClient := printer.New(printerCfg)
+	if printerCfg.Enabled && printerCfg.URL != "" {
+		log.Printf("Printer integration enabled: %s", printerCfg.URL)
+	}
+
 	authHandler := &handlers.AuthHandler{DB: database, JWTSecret: jwtSecret}
 	userHandler := &handlers.UserHandler{DB: database}
 
@@ -130,12 +138,12 @@ func main() {
 			authed.PATCH("/events/:id/public", toggleEventPublicHandler(database))
 			authed.PATCH("/events/:id/visibility", setEventHiddenHandler(database))
 			authed.GET("/events/:id/roll", getRollStateHandler(database))
-			authed.POST("/events/:id/roll", performRollHandler(database))
+			authed.POST("/events/:id/roll", performRollHandler(database, printerClient))
 			authed.POST("/events/:id/roll/reset", resetRollHandler(database))
 			authed.DELETE("/events/:id/roll/pool/:poolId", undoConsumedHandler(database))
 			authed.DELETE("/events/:id/roll/veto/:poolId", undoVetoHandler(database))
-			authed.POST("/events/:id/roll/:turnId/accept", acceptRollHandler(database))
-			authed.POST("/events/:id/roll/:turnId/veto", vetoRollHandler(database))
+			authed.POST("/events/:id/roll/:turnId/accept", acceptRollHandler(database, printerClient))
+			authed.POST("/events/:id/roll/:turnId/veto", vetoRollHandler(database, printerClient))
 
 			// Shared lists
 			authed.GET("/shared-lists", listSharedLists(database))
@@ -156,9 +164,9 @@ func main() {
 
 		// Public roll endpoints (no auth)
 		api.GET("/public/roll", getPublicRollHandler(database))
-		api.POST("/public/roll", publicPerformRollHandler(database))
-		api.POST("/public/roll/:turnId/accept", publicAcceptRollHandler(database))
-		api.POST("/public/roll/:turnId/veto", publicVetoRollHandler(database))
+		api.POST("/public/roll", publicPerformRollHandler(database, printerClient))
+		api.POST("/public/roll/:turnId/accept", publicAcceptRollHandler(database, printerClient))
+		api.POST("/public/roll/:turnId/veto", publicVetoRollHandler(database, printerClient))
 
 		// Admin
 		admin := api.Group("/admin")
@@ -804,7 +812,7 @@ func getRollStateHandler(database *db.DB) gin.HandlerFunc {
 	}
 }
 
-func performRollHandler(database *db.DB) gin.HandlerFunc {
+func performRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims := auth.ClaimsFromContext(c)
 		id, err := strconv.Atoi(c.Param("id"))
@@ -829,11 +837,12 @@ func performRollHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		p.Send(formatTurnReceipt(turn))
 		c.JSON(http.StatusOK, turn)
 	}
 }
 
-func acceptRollHandler(database *db.DB) gin.HandlerFunc {
+func acceptRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims := auth.ClaimsFromContext(c)
 		id, err := strconv.Atoi(c.Param("id"))
@@ -855,11 +864,18 @@ func acceptRollHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if turn, err := database.GetRollTurn(id, turnID); err == nil {
+			resolvedAt := ""
+			if turn.ResolvedAt != nil {
+				resolvedAt = *turn.ResolvedAt
+			}
+			p.SendAndCut(printer.FormatStatus(turn.Username, "accepted", turn.CreatedAt, resolvedAt) + "\n\n\n\n")
+		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 
-func vetoRollHandler(database *db.DB) gin.HandlerFunc {
+func vetoRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims := auth.ClaimsFromContext(c)
 		id, err := strconv.Atoi(c.Param("id"))
@@ -881,8 +897,26 @@ func vetoRollHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if turn, err := database.GetRollTurn(id, turnID); err == nil {
+			resolvedAt := ""
+			if turn.ResolvedAt != nil {
+				resolvedAt = *turn.ResolvedAt
+			}
+			p.Send(printer.FormatStatus(turn.Username, "vetoed", turn.CreatedAt, resolvedAt))
+		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
+}
+
+func formatTurnReceipt(t *db.RollTurn) string {
+	if t == nil {
+		return ""
+	}
+	thin := ""
+	if t.ProductNameThin != nil {
+		thin = *t.ProductNameThin
+	}
+	return printer.FormatRoll(t.Username, t.ProducerName, t.ProductNameBold, thin, t.Country, t.Status)
 }
 
 func requireOwnerOrAdmin(c *gin.Context, database *db.DB, eventID int) bool {
@@ -1253,7 +1287,7 @@ func getPublicRollHandler(database *db.DB) gin.HandlerFunc {
 	}
 }
 
-func publicPerformRollHandler(database *db.DB) gin.HandlerFunc {
+func publicPerformRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ev, err := database.GetPublicEvent()
 		if err != nil {
@@ -1272,11 +1306,12 @@ func publicPerformRollHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		p.Send(formatTurnReceipt(turn))
 		c.JSON(http.StatusOK, turn)
 	}
 }
 
-func publicAcceptRollHandler(database *db.DB) gin.HandlerFunc {
+func publicAcceptRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ev, err := database.GetPublicEvent()
 		if err != nil {
@@ -1292,11 +1327,18 @@ func publicAcceptRollHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if turn, err := database.GetRollTurn(ev.ID, turnID); err == nil {
+			resolvedAt := ""
+			if turn.ResolvedAt != nil {
+				resolvedAt = *turn.ResolvedAt
+			}
+			p.SendAndCut(printer.FormatStatus(turn.Username, "accepted", turn.CreatedAt, resolvedAt) + "\n\n\n")
+		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 
-func publicVetoRollHandler(database *db.DB) gin.HandlerFunc {
+func publicVetoRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ev, err := database.GetPublicEvent()
 		if err != nil {
@@ -1312,7 +1354,13 @@ func publicVetoRollHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if turn, err := database.GetRollTurn(ev.ID, turnID); err == nil {
+			resolvedAt := ""
+			if turn.ResolvedAt != nil {
+				resolvedAt = *turn.ResolvedAt
+			}
+			p.Send(printer.FormatStatus(turn.Username, "vetoed", turn.CreatedAt, resolvedAt))
+		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
-

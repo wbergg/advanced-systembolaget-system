@@ -1,7 +1,13 @@
 package systembolaget
 
 type Config struct {
-	APIKey string `json:"api_key"`
+	APIKey  string        `json:"api_key"`
+	Printer PrinterConfig `json:"printer"`
+}
+
+type PrinterConfig struct {
+	Enabled bool   `json:"enabled"`
+	URL     string `json:"url"`
 }
 
 type ProductImage struct {

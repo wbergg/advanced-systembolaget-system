@@ -277,6 +277,28 @@ func (db *DB) PerformRoll(eventID, targetUserID int) (*RollTurn, error) {
 	return &turn, nil
 }
 
+func (db *DB) GetRollTurn(eventID, turnID int) (*RollTurn, error) {
+	var turn RollTurn
+	var resolvedAt *string
+	err := db.conn.QueryRow(`
+		SELECT rt.id, rt.event_id, rt.pool_id, rt.user_id, u.username,
+			p.name_bold, p.name_thin, p.producer_name, p.country, COALESCE(p.image_url, ''),
+			rt.status, rt.created_at, rt.resolved_at
+		FROM roll_turns rt
+		JOIN users u ON rt.user_id = u.id
+		JOIN roll_pool rp ON rt.pool_id = rp.id
+		JOIN products p ON rp.product_id = p.product_id
+		WHERE rt.event_id = ? AND rt.id = ?
+	`, eventID, turnID).Scan(&turn.ID, &turn.EventID, &turn.PoolID, &turn.UserID, &turn.Username,
+		&turn.ProductNameBold, &turn.ProductNameThin, &turn.ProducerName, &turn.Country, &turn.ImageURL,
+		&turn.Status, &turn.CreatedAt, &resolvedAt)
+	if err != nil {
+		return nil, err
+	}
+	turn.ResolvedAt = resolvedAt
+	return &turn, nil
+}
+
 func (db *DB) AcceptRoll(eventID, turnID int) error {
 	tx, err := db.conn.Begin()
 	if err != nil {
