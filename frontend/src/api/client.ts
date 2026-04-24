@@ -85,6 +85,21 @@ export async function deleteAllProducts(): Promise<{ deleted: number }> {
   return res.json()
 }
 
+export async function debugSBProbe(
+  number: string,
+  filters: Record<string, string> = {},
+): Promise<any> {
+  const params = new URLSearchParams()
+  for (const [k, v] of Object.entries(filters)) {
+    if (v !== undefined && v !== null && v !== '') params.set(k, v)
+  }
+  const qs = params.toString()
+  const url = `/api/admin/debug/sb-probe/${encodeURIComponent(number)}${qs ? '?' + qs : ''}`
+  const res = await authFetch(url)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 // Products
 
 export interface Product {
@@ -169,6 +184,12 @@ export async function getDistinctValues(column: string): Promise<string[]> {
 
 export async function getProduct(id: string): Promise<Product> {
   const res = await authFetch(`/api/products/${id}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getProductByNumber(number: string): Promise<Product> {
+  const res = await authFetch(`/api/products/by-number/${number}`)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

@@ -11,6 +11,7 @@ import {
   removeFromSharedList, addToSharedList,
   shareSharedList, unshareSharedList, listAllUsers,
   renameSharedList, setSharedListLocked, updateSharedListItemQty,
+  getProductByNumber,
   type SharedList, type ShareUser,
 } from '../api/client'
 
@@ -191,6 +192,8 @@ const jsonImportDialogVisible = ref(false)
 const jsonImportText = ref('')
 const jsonImportBusy = ref(false)
 const jsonImportResult = ref<string | null>(null)
+const jsonImportIdType = ref<'productId' | 'productNumber'>('productId')
+const jsonImportFailures = ref<{ identifier: string; reason: string }[]>([])
 
 function doExport() {
   if (!activeList.value?.items?.length) return
@@ -215,12 +218,15 @@ async function copyExportText() {
 function openJsonImport() {
   jsonImportText.value = ''
   jsonImportResult.value = null
+  jsonImportIdType.value = 'productId'
+  jsonImportFailures.value = []
   jsonImportDialogVisible.value = true
 }
 
 async function doJsonImport() {
   jsonImportResult.value = null
-  let parsed: { name?: string; items: { productId: string; quantity: number }[] }
+  jsonImportFailures.value = []
+  let parsed: { name?: string; items: { productId?: string; productNumber?: string; quantity: number }[] }
   try {
     parsed = JSON.parse(jsonImportText.value)
   } catch {
@@ -242,19 +248,41 @@ async function doJsonImport() {
       emit('update:activeId', listId)
     }
     let added = 0
-    let failed = 0
+    const failures: { identifier: string; reason: string }[] = []
     for (const item of parsed.items) {
-      if (!item.productId) continue
+      let productId: string | undefined
+      let identifier = ''
+      if (jsonImportIdType.value === 'productNumber') {
+        const num = item.productNumber || item.productId
+        identifier = num ? String(num) : '(missing productNumber)'
+        if (!num) { failures.push({ identifier, reason: 'no productNumber in item' }); continue }
+        try {
+          const p = await getProductByNumber(String(num))
+          productId = p.productId
+        } catch (e: any) {
+          failures.push({ identifier, reason: `lookup failed: ${e?.message || String(e)}` })
+          continue
+        }
+      } else {
+        identifier = item.productId ? String(item.productId) : '(missing productId)'
+        productId = item.productId
+      }
+      if (!productId) { failures.push({ identifier, reason: 'no productId resolved' }); continue }
       try {
-        await addToSharedList(listId, item.productId, item.quantity || 1)
+        await addToSharedList(listId, productId, item.quantity || 1)
         added++
-      } catch {
-        failed++
+      } catch (e: any) {
+        failures.push({ identifier, reason: `add failed: ${e?.message || String(e)}` })
       }
     }
     await loadLists()
     await selectList(listId)
-    jsonImportDialogVisible.value = false
+    jsonImportFailures.value = failures
+    if (failures.length > 0) {
+      jsonImportResult.value = `Imported ${added} items, ${failures.length} failed.`
+    } else {
+      jsonImportDialogVisible.value = false
+    }
   } catch (e: any) {
     jsonImportResult.value = `Error: ${e?.message || String(e)}`
   } finally {
@@ -424,10 +452,29 @@ onMounted(loadLists)
           Paste an exported list JSON below.
           {{ activeList ? `Items will be added to "${activeList.name}".` : 'A new list will be created.' }}
         </p>
-        <Textarea v-model="jsonImportText" autoResize style="width: 100%; font-family: monospace; font-size: 0.8rem;" rows="5" placeholder='{"name":"...","items":[...]}' />
+        <div class="import-idtype">
+          <span class="import-idtype-label">Identify items by:</span>
+          <label class="import-idtype-option">
+            <input type="radio" value="productId" v-model="jsonImportIdType" />
+            <span>Product ID</span>
+          </label>
+          <label class="import-idtype-option">
+            <input type="radio" value="productNumber" v-model="jsonImportIdType" />
+            <span>Product number (Nr)</span>
+          </label>
+        </div>
+        <Textarea v-model="jsonImportText" style="width: 100%; font-family: monospace; font-size: 0.8rem; max-height: 40vh; resize: vertical;" rows="8" :placeholder="jsonImportIdType === 'productNumber' ? '{&quot;name&quot;:&quot;...&quot;,&quot;items&quot;:[{&quot;productNumber&quot;:&quot;8811015&quot;,&quot;quantity&quot;:1}]}' : '{&quot;name&quot;:&quot;...&quot;,&quot;items&quot;:[{&quot;productId&quot;:&quot;...&quot;,&quot;quantity&quot;:1}]}'" />
         <div style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
           <Button label="Import" icon="pi pi-download" size="small" :disabled="!jsonImportText.trim() || jsonImportBusy" :loading="jsonImportBusy" @click="doJsonImport" />
           <span v-if="jsonImportResult" class="import-result">{{ jsonImportResult }}</span>
+        </div>
+        <div v-if="jsonImportFailures.length > 0" class="import-failures">
+          <div class="import-failures-header">Failed items:</div>
+          <ul class="import-failures-list">
+            <li v-for="(f, idx) in jsonImportFailures" :key="idx">
+              <code>{{ f.identifier }}</code> &mdash; {{ f.reason }}
+            </li>
+          </ul>
         </div>
       </div>
     </Dialog>
@@ -577,6 +624,56 @@ onMounted(loadLists)
 .import-result {
   font-size: 0.8rem;
   color: var(--text-secondary);
+}
+
+.import-idtype {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.import-idtype-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.import-idtype-option {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+
+.import-failures {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border-light);
+  padding-top: 0.5rem;
+}
+
+.import-failures-header {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--danger, #c0392b);
+  margin-bottom: 0.25rem;
+}
+
+.import-failures-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  max-height: 25vh;
+  overflow-y: auto;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.import-failures-list code {
+  font-family: monospace;
+  background: var(--bg-muted);
+  padding: 0 0.25rem;
+  border-radius: 3px;
 }
 
 .section-label {

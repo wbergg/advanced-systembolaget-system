@@ -211,7 +211,7 @@ onMounted(() => {
     <div class="filters">
       <div class="filter-group">
         <label>Search:</label>
-        <InputText v-model="search" placeholder="Name, producer, taste..." />
+        <InputText v-model="search" placeholder="Name, producer, taste, id, nr..." />
       </div>
       <div class="filter-group">
         <label>Name:</label>

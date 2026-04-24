@@ -110,6 +110,7 @@ func main() {
 
 			authed.GET("/products", listProducts(database))
 			authed.GET("/products/distinct/:column", distinctValues(database))
+			authed.GET("/products/by-number/:number", getProductByNumber(database))
 			authed.GET("/products/:id", getProduct(database))
 			authed.PATCH("/products/:id/notes", updateNote(database))
 			authed.GET("/products/:id/comments", getComments(database))
@@ -180,6 +181,7 @@ func main() {
 			admin.DELETE("/comments/:id", deleteComment(database))
 			admin.DELETE("/products/:id", deleteProductHandler(database))
 			admin.DELETE("/products", deleteAllProductsHandler(database))
+			admin.GET("/debug/sb-probe/:number", debugSBProbe())
 		}
 	}
 
@@ -272,6 +274,21 @@ func listProducts(database *db.DB) gin.HandlerFunc {
 func getProduct(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		p, err := database.GetProduct(c.Param("id"))
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, p)
+	}
+}
+
+func getProductByNumber(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, err := database.GetProductByNumber(c.Param("number"))
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
 			return
@@ -424,6 +441,112 @@ func syncProducts(database *db.DB) gin.HandlerFunc {
 
 		c.SSEvent("done", gin.H{"synced": len(products)})
 		c.Writer.Flush()
+	}
+}
+
+// debugSBProbe queries the live Systembolaget API for a single product number
+// (plus optional sync filters via query string) and reports what would happen
+// to it during a sync: whether the API returns it, and which of our
+// client-side filters (if any) would reject it.
+func debugSBProbe() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		number := c.Param("number")
+		if number == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "product number required"})
+			return
+		}
+
+		cfg, err := systembolaget.LoadConfig(configFile)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("no API key configured: %v", err)})
+			return
+		}
+
+		// Build the same filters the sync UI would, from query params.
+		passthrough := map[string]string{}
+		for _, m := range systembolaget.ParamMappings {
+			if v := c.Query(m.Flag); v != "" {
+				passthrough[m.Flag] = v
+			}
+		}
+		filteredQuery := systembolaget.BuildQueryFromMap(passthrough)
+		filteredQuery.Set("q", number)
+
+		numberQuery := systembolaget.BuildQueryFromMap(map[string]string{})
+		numberQuery.Set("q", number)
+
+		withFilters, _, errFiltered := systembolaget.FetchRaw(cfg.APIKey, filteredQuery)
+		byNumberOnly, _, errNumber := systembolaget.FetchRaw(cfg.APIKey, numberQuery)
+
+		type verdict struct {
+			Reject  bool     `json:"wouldRejectClientSide"`
+			Reasons []string `json:"rejectReasons,omitempty"`
+		}
+		check := func(rp systembolaget.RawProduct) verdict {
+			var reasons []string
+			if rp.IsRegionalRestricted {
+				reasons = append(reasons, "isRegionalRestricted")
+			}
+			if rp.IsDiscontinued {
+				reasons = append(reasons, "isDiscontinued")
+			}
+			if rp.IsCompletelyOutOfStock {
+				reasons = append(reasons, "isCompletelyOutOfStock")
+			}
+			if rp.IsTemporaryOutOfStock {
+				reasons = append(reasons, "isTemporaryOutOfStock")
+			}
+			if rp.RestrictedParcelQuantity > 0 {
+				reasons = append(reasons, fmt.Sprintf("restrictedParcelQuantity=%d", rp.RestrictedParcelQuantity))
+			}
+			return verdict{Reject: len(reasons) > 0, Reasons: reasons}
+		}
+
+		findNumber := func(list []systembolaget.RawProduct) *systembolaget.RawProduct {
+			for i := range list {
+				if list[i].ProductNumber == number {
+					return &list[i]
+				}
+			}
+			return nil
+		}
+
+		result := gin.H{
+			"productNumber":  number,
+			"filtersApplied": passthrough,
+		}
+
+		if errFiltered != nil {
+			result["withFiltersError"] = errFiltered.Error()
+		} else {
+			hit := findNumber(withFilters)
+			entry := gin.H{
+				"apiReturnedProduct": hit != nil,
+				"totalHitsInFirstPage": len(withFilters),
+			}
+			if hit != nil {
+				entry["product"] = hit
+				entry["verdict"] = check(*hit)
+			}
+			result["withFilters"] = entry
+		}
+
+		if errNumber != nil {
+			result["withoutFiltersError"] = errNumber.Error()
+		} else {
+			hit := findNumber(byNumberOnly)
+			entry := gin.H{
+				"apiReturnedProduct":   hit != nil,
+				"totalHitsInFirstPage": len(byNumberOnly),
+			}
+			if hit != nil {
+				entry["product"] = hit
+				entry["verdict"] = check(*hit)
+			}
+			result["withoutFilters"] = entry
+		}
+
+		c.JSON(http.StatusOK, result)
 	}
 }
 

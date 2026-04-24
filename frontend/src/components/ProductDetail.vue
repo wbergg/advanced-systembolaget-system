@@ -81,7 +81,8 @@ onMounted(loadComments)
       <p v-if="product.usage"><strong>Usage:</strong> {{ product.usage }}</p>
       <p v-if="product.vintage"><strong>Vintage:</strong> {{ product.vintage }}</p>
       <p>
-        <strong>Nr:</strong> {{ product.productNumber }}
+        <strong>Nr:</strong> {{ product.productNumber }}<br>
+        <strong>Product ID:</strong> {{ product.productId }}
         <span v-if="product.isOrganic" class="badge-organic" style="margin-left: 0.5rem">Organic</span>
         <span v-if="product.isNews" class="badge-news" style="margin-left: 0.5rem">New</span>
       </p>

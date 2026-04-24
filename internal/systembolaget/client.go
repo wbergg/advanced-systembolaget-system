@@ -181,17 +181,17 @@ func FetchAll(apiKey string, query url.Values, progress ProgressFunc) ([]Product
 		page = sr.Metadata.NextPage
 	}
 
-	// Deduplicate by name (productNameBold + productNameThin), keeping newest launch date
-	seen := make(map[string]int) // name key -> index in deduped
+	// Deduplicate by name + volume so different package sizes of the same beer
+	// are both kept. Keep the newest launch date on collision.
+	seen := make(map[string]int) // name+volume key -> index in deduped
 	var deduped []Product
 	for _, p := range all {
 		thin := ""
 		if p.ProductNameThin != nil {
 			thin = *p.ProductNameThin
 		}
-		key := p.ProductNameBold + "\x00" + thin
+		key := fmt.Sprintf("%s\x00%s\x00%g", p.ProductNameBold, thin, p.Volume)
 		if idx, ok := seen[key]; ok {
-			// Keep the one with the newer launch date
 			if p.ProductLaunchDate > deduped[idx].ProductLaunchDate {
 				deduped[idx] = p
 			}
@@ -202,4 +202,38 @@ func FetchAll(apiKey string, query url.Values, progress ProgressFunc) ([]Product
 	}
 
 	return deduped, nil
+}
+
+// FetchRaw hits the Systembolaget API once with the given query and returns
+// the raw RawProduct entries plus the response metadata. No client-side
+// filtering or dedup is applied. Intended for debugging sync misses.
+func FetchRaw(apiKey string, query url.Values) ([]RawProduct, SearchResponse, error) {
+	u := APIBaseURL + "?" + query.Encode()
+
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, SearchResponse{}, err
+	}
+	req.Header.Set("Ocp-Apim-Subscription-Key", apiKey)
+	req.Header.Set("Origin", SystembolagetURL)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, SearchResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, SearchResponse{}, fmt.Errorf("API key invalid or expired")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, SearchResponse{}, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var sr SearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
+		return nil, SearchResponse{}, fmt.Errorf("decode failed: %w", err)
+	}
+	return sr.Products, sr, nil
 }

@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
-import { listUsers, createUser, updateUser, deleteUser, deleteAllProducts, type AuthUser } from '../api/client'
+import { listUsers, createUser, updateUser, deleteUser, deleteAllProducts, debugSBProbe, type AuthUser } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
@@ -95,6 +95,35 @@ async function doImpersonate(userId: number) {
 
 const purging = ref(false)
 const purgeResult = ref<string | null>(null)
+
+// SB probe (debug)
+const probeNumber = ref('')
+const probeCategory = ref('')
+const probePackaging = ref('')
+const probePriceMin = ref('')
+const probePriceMax = ref('')
+const probeBusy = ref(false)
+const probeResult = ref<any | null>(null)
+const probeError = ref<string | null>(null)
+
+async function doProbe() {
+  if (!probeNumber.value.trim()) return
+  probeBusy.value = true
+  probeResult.value = null
+  probeError.value = null
+  try {
+    probeResult.value = await debugSBProbe(probeNumber.value.trim(), {
+      'kategori': probeCategory.value,
+      'forpackning': probePackaging.value,
+      'pris-fran': probePriceMin.value,
+      'pris-till': probePriceMax.value,
+    })
+  } catch (e: any) {
+    probeError.value = e?.message || String(e)
+  } finally {
+    probeBusy.value = false
+  }
+}
 
 async function doPurgeProducts() {
   if (!confirm('Delete ALL products from the database? This cannot be undone.')) return
@@ -193,6 +222,62 @@ onMounted(loadUsers)
       No users found.
     </div>
 
+    <div class="probe-zone">
+      <h4>Sync probe (debug)</h4>
+      <p class="probe-desc">
+        Ask the live Systembolaget API about a specific product number and see whether it's returned under your sync filters, and whether any of our client-side flags would reject it.
+      </p>
+      <div class="probe-form">
+        <div class="probe-field">
+          <label>Product Nr</label>
+          <InputText v-model="probeNumber" placeholder="e.g. 120115" size="small" />
+        </div>
+        <div class="probe-field">
+          <label>Kategori</label>
+          <InputText v-model="probeCategory" placeholder="Öl" size="small" />
+        </div>
+        <div class="probe-field">
+          <label>Förpackning</label>
+          <InputText v-model="probePackaging" placeholder="Burk" size="small" />
+        </div>
+        <div class="probe-field">
+          <label>Pris från</label>
+          <InputText v-model="probePriceMin" placeholder="0" size="small" style="width: 80px;" />
+        </div>
+        <div class="probe-field">
+          <label>Pris till</label>
+          <InputText v-model="probePriceMax" placeholder="30" size="small" style="width: 80px;" />
+        </div>
+        <Button label="Probe" icon="pi pi-search" size="small" :loading="probeBusy" :disabled="!probeNumber.trim()" @click="doProbe" style="align-self: flex-end;" />
+      </div>
+      <div v-if="probeError" class="error-msg" style="margin-top: 0.5rem;">{{ probeError }}</div>
+      <div v-if="probeResult" class="probe-result">
+        <div class="probe-summary">
+          <div class="probe-line">
+            <strong>With filters:</strong>
+            <span v-if="probeResult.withFilters?.apiReturnedProduct" class="probe-yes">API returned it</span>
+            <span v-else class="probe-no">API did NOT return it</span>
+            <span v-if="probeResult.withFilters?.verdict?.wouldRejectClientSide" class="probe-reject">
+              Client would reject: {{ probeResult.withFilters.verdict.rejectReasons.join(', ') }}
+            </span>
+            <span v-else-if="probeResult.withFilters?.apiReturnedProduct" class="probe-accept">Client would keep it</span>
+          </div>
+          <div class="probe-line">
+            <strong>Without filters:</strong>
+            <span v-if="probeResult.withoutFilters?.apiReturnedProduct" class="probe-yes">API returned it</span>
+            <span v-else class="probe-no">API did NOT return it (hidden/depot-only/unsearchable)</span>
+            <span v-if="probeResult.withoutFilters?.verdict?.wouldRejectClientSide" class="probe-reject">
+              Client would reject: {{ probeResult.withoutFilters.verdict.rejectReasons.join(', ') }}
+            </span>
+          </div>
+        </div>
+        <details class="probe-raw">
+          <summary>Raw JSON</summary>
+          <pre>{{ JSON.stringify(probeResult, null, 2) }}</pre>
+        </details>
+      </div>
+    </div>
+
     <div class="danger-zone">
       <h4>Danger Zone</h4>
       <div class="danger-row">
@@ -285,5 +370,107 @@ onMounted(loadUsers)
   color: var(--text-secondary);
   margin-top: 0.5rem;
   display: block;
+}
+
+.probe-zone {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.probe-zone h4 {
+  margin: 0 0 0.35rem 0;
+  font-size: 0.9rem;
+}
+
+.probe-desc {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.probe-form {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.probe-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.probe-field label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.probe-result {
+  margin-top: 0.75rem;
+  background: var(--bg-muted);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+}
+
+.probe-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.probe-line {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.probe-yes {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.probe-no {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.probe-reject {
+  color: var(--danger);
+  font-size: 0.8rem;
+}
+
+.probe-accept {
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+.probe-raw {
+  margin-top: 0.6rem;
+  font-size: 0.75rem;
+}
+
+.probe-raw summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.probe-raw pre {
+  margin: 0.4rem 0 0 0;
+  max-height: 40vh;
+  overflow: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>

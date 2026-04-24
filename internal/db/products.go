@@ -97,10 +97,11 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 	var args []any
 
 	if f.Search != "" {
-		where = append(where, fmt.Sprintf("(%s LIKE ? OR %s LIKE ? OR %s LIKE ?)",
-			sqlFold("p.name_bold"), sqlFold("p.producer_name"), sqlFold("p.taste")))
+		where = append(where, fmt.Sprintf("(%s LIKE ? OR %s LIKE ? OR %s LIKE ? OR %s LIKE ? OR p.product_id LIKE ? OR p.product_number LIKE ?)",
+			sqlFold("p.name_bold"), sqlFold("p.name_thin"), sqlFold("p.producer_name"), sqlFold("p.taste")))
 		s := "%" + strings.ToLower(f.Search) + "%"
-		args = append(args, s, s, s)
+		raw := "%" + f.Search + "%"
+		args = append(args, s, s, s, s, raw, raw)
 	}
 	if f.Category != "" {
 		where = append(where, "p.category_level1 = ?")
@@ -243,6 +244,30 @@ func (db *DB) GetProduct(id string) (*ProductWithNote, error) {
 		LEFT JOIN notes n ON p.product_id = n.product_id
 		WHERE p.product_id = ?
 	`, id).Scan(
+		&p.ProductID, &p.ProductNumber, &p.ProductNameBold, &p.ProductNameThin,
+		&p.ProducerName, &p.Price, &p.Volume, &p.VolumeText, &p.AlcoholPercent,
+		&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &p.AssortmentText,
+		&p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
+		&p.Assortment, &p.RestrictedParcelQuantity, &p.Vintage, &p.ImageURL, &p.Note,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (db *DB) GetProductByNumber(number string) (*ProductWithNote, error) {
+	var p ProductWithNote
+	err := db.conn.QueryRow(`
+		SELECT p.product_id, p.product_number, p.name_bold, p.name_thin,
+			p.producer_name, p.price, p.volume, p.volume_text, p.alcohol_pct,
+			p.country, p.category_level1, p.category_level2, p.assortment_text,
+			p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
+			p.assortment, p.restricted_parcel_qty, p.vintage, p.image_url, n.note
+		FROM products p
+		LEFT JOIN notes n ON p.product_id = n.product_id
+		WHERE p.product_number = ?
+	`, number).Scan(
 		&p.ProductID, &p.ProductNumber, &p.ProductNameBold, &p.ProductNameThin,
 		&p.ProducerName, &p.Price, &p.Volume, &p.VolumeText, &p.AlcoholPercent,
 		&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &p.AssortmentText,
