@@ -770,7 +770,8 @@ func importSharedListHandler(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		var body struct {
-			ListID int `json:"listId"`
+			ListID  int  `json:"listId"`
+			Replace bool `json:"replace"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil || body.ListID == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "listId is required"})
@@ -783,7 +784,12 @@ func importSharedListHandler(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		if eventType == "roll" {
-			if err := database.ImportSharedListToRollPool(id, body.ListID, claims.UserID, claims.Role == "admin"); err != nil {
+			if body.Replace {
+				if err := database.ReplaceRollPoolWithSharedList(id, body.ListID, claims.UserID, claims.Role == "admin"); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+			} else if err := database.ImportSharedListToRollPool(id, body.ListID, claims.UserID, claims.Role == "admin"); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}

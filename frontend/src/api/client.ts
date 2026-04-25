@@ -410,11 +410,11 @@ export async function uninviteFromEvent(eventId: number, userId: number): Promis
   if (!res.ok) throw new Error(await res.text())
 }
 
-export async function importSharedListToEvent(eventId: number, listId: number): Promise<void> {
+export async function importSharedListToEvent(eventId: number, listId: number, replace = false): Promise<void> {
   const res = await authFetch(`/api/events/${eventId}/import-list`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ listId }),
+    body: JSON.stringify({ listId, replace }),
   })
   if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to import list') }
 }

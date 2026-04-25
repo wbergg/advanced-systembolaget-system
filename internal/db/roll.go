@@ -459,6 +459,39 @@ func (db *DB) ImportSharedListToRollPool(eventID, listID, userID int, isAdmin bo
 	return err
 }
 
+func (db *DB) ReplaceRollPoolWithSharedList(eventID, listID, userID int, isAdmin bool) error {
+	var ownerID int
+	err := db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	if err != nil {
+		return fmt.Errorf("event not found")
+	}
+	if ownerID != userID && !isAdmin {
+		return fmt.Errorf("only the owner or admin can import lists")
+	}
+	if _, err := db.canAccessSharedList(listID, userID); err != nil {
+		return err
+	}
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM roll_turns WHERE event_id = ?", eventID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM roll_pool WHERE event_id = ?", eventID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO roll_pool (event_id, product_id)
+		SELECT ?, product_id FROM shared_list_items WHERE list_id = ?
+	`, eventID, listID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (db *DB) ResetRoll(eventID int) error {
 	tx, err := db.conn.Begin()
 	if err != nil {

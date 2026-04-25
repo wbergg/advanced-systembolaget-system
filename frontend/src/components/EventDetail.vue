@@ -151,7 +151,12 @@ async function openImportDialog() {
 
 async function doImport() {
   if (!event.value || !selectedList.value) return
-  await importSharedListToEvent(event.value.id, selectedList.value.id)
+  let replace = false
+  if (isRoll.value && event.value.beerCount > 0) {
+    if (!confirm('This will replace all beers currently in this roll event with the contents of the selected list. Continue?')) return
+    replace = true
+  }
+  await importSharedListToEvent(event.value.id, selectedList.value.id, replace)
   importDialogVisible.value = false
   await loadEvent()
 }

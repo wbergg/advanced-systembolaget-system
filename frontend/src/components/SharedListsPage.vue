@@ -177,6 +177,52 @@ const emit = defineEmits<{ 'update:activeId': [id: number | undefined] }>()
 
 const activeItems = computed(() => activeList.value?.items || [])
 
+type SortField =
+  | 'productNameBold' | 'categoryLevel1' | 'alcoholPercentage'
+  | 'volume' | 'price' | 'quantity' | 'subtotal' | 'addedBy'
+
+const sortField = ref<SortField>('productNameBold')
+const sortDir = ref<'asc' | 'desc'>('asc')
+
+function sortValue(item: any, field: SortField): string | number {
+  if (field === 'subtotal') return (item.price || 0) * (item.quantity || 0)
+  const v = item[field]
+  return v ?? ''
+}
+
+const sortedItems = computed(() => {
+  const items = [...activeItems.value]
+  const field = sortField.value
+  const dir = sortDir.value === 'asc' ? 1 : -1
+  items.sort((a, b) => {
+    const av = sortValue(a, field)
+    const bv = sortValue(b, field)
+    if (typeof av === 'number' && typeof bv === 'number') {
+      return (av - bv) * dir
+    }
+    return String(av).localeCompare(String(bv), 'sv') * dir
+  })
+  return items
+})
+
+function toggleSort(field: SortField) {
+  if (sortField.value === field) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortField.value = field
+    sortDir.value = 'asc'
+  }
+}
+
+function sortIcon(field: SortField): string {
+  if (sortField.value !== field) return 'pi pi-sort-alt'
+  return sortDir.value === 'asc' ? 'pi pi-sort-amount-up-alt' : 'pi pi-sort-amount-down'
+}
+
+function isSorted(field: SortField): boolean {
+  return sortField.value === field
+}
+
 async function refreshActive() {
   if (activeList.value) {
     await selectList(activeList.value.id)
@@ -381,19 +427,51 @@ onMounted(loadLists)
         <thead>
           <tr>
             <th></th>
-            <th>Product</th>
-            <th>Category</th>
-            <th>ABV%</th>
-            <th>Volume</th>
-            <th>Price</th>
-            <th style="width: 80px;">Qty</th>
-            <th style="text-align: right;">Subtotal</th>
-            <th>Added by</th>
+            <th>
+              <span class="sort-header" :class="{ active: isSorted('productNameBold') }" @click="toggleSort('productNameBold')">
+                Product <i :class="sortIcon('productNameBold')"></i>
+              </span>
+            </th>
+            <th>
+              <span class="sort-header" :class="{ active: isSorted('categoryLevel1') }" @click="toggleSort('categoryLevel1')">
+                Category <i :class="sortIcon('categoryLevel1')"></i>
+              </span>
+            </th>
+            <th>
+              <span class="sort-header" :class="{ active: isSorted('alcoholPercentage') }" @click="toggleSort('alcoholPercentage')">
+                ABV% <i :class="sortIcon('alcoholPercentage')"></i>
+              </span>
+            </th>
+            <th>
+              <span class="sort-header" :class="{ active: isSorted('volume') }" @click="toggleSort('volume')">
+                Volume <i :class="sortIcon('volume')"></i>
+              </span>
+            </th>
+            <th>
+              <span class="sort-header" :class="{ active: isSorted('price') }" @click="toggleSort('price')">
+                Price <i :class="sortIcon('price')"></i>
+              </span>
+            </th>
+            <th style="width: 80px;">
+              <span class="sort-header" :class="{ active: isSorted('quantity') }" @click="toggleSort('quantity')">
+                Qty <i :class="sortIcon('quantity')"></i>
+              </span>
+            </th>
+            <th style="text-align: right;">
+              <span class="sort-header" :class="{ active: isSorted('subtotal') }" @click="toggleSort('subtotal')">
+                Subtotal <i :class="sortIcon('subtotal')"></i>
+              </span>
+            </th>
+            <th>
+              <span class="sort-header" :class="{ active: isSorted('addedBy') }" @click="toggleSort('addedBy')">
+                Added by <i :class="sortIcon('addedBy')"></i>
+              </span>
+            </th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in activeItems" :key="item.productId">
+          <tr v-for="item in sortedItems" :key="item.productId">
             <td>
               <img v-if="item.imageUrl" :src="item.imageUrl.replace('_400.', '_60.')" class="list-thumb" />
             </td>
@@ -564,6 +642,38 @@ onMounted(loadLists)
 
 .list-controls {
   margin-bottom: 0.75rem;
+}
+
+.sort-header {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text-secondary);
+  transition: color 0.15s;
+}
+
+.sort-header i {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  transition: color 0.15s;
+}
+
+.sort-header:hover {
+  color: var(--text);
+}
+
+.sort-header:hover i {
+  color: var(--text-muted);
+}
+
+.sort-header.active {
+  color: var(--accent);
+}
+
+.sort-header.active i {
+  color: var(--accent);
 }
 
 .link-bar {
