@@ -179,6 +179,7 @@ func main() {
 			admin.DELETE("/users/:id", userHandler.Delete)
 			admin.POST("/impersonate/:id", authHandler.Impersonate)
 			admin.DELETE("/comments/:id", deleteComment(database))
+			admin.POST("/products", createProductHandler(database))
 			admin.DELETE("/products/:id", deleteProductHandler(database))
 			admin.DELETE("/products", deleteAllProductsHandler(database))
 			admin.GET("/debug/sb-probe/:number", debugSBProbe())
@@ -384,6 +385,40 @@ func deleteProductHandler(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func createProductHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var p systembolaget.Product
+		if err := c.ShouldBindJSON(&p); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+		if strings.TrimSpace(p.ProductNameBold) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "productNameBold is required"})
+			return
+		}
+		if strings.TrimSpace(p.ProductID) == "" {
+			b := make([]byte, 8)
+			if _, err := rand.Read(b); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate product id"})
+				return
+			}
+			p.ProductID = "manual-" + hex.EncodeToString(b)
+		}
+		if err := database.UpsertProducts([]systembolaget.Product{p}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		claims := auth.ClaimsFromContext(c)
+		database.AuditLog(claims.UserID, "create_product", p.ProductID)
+		created, err := database.GetProduct(p.ProductID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, created)
 	}
 }
 

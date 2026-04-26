@@ -79,6 +79,46 @@ export async function deleteProduct(id: string): Promise<void> {
   if (!res.ok) throw new Error(await res.text())
 }
 
+export interface NewProductPayload {
+  productId?: string
+  productNumber?: string
+  productNameBold: string
+  productNameThin?: string | null
+  producerName?: string
+  price?: number
+  volume?: number
+  volumeText?: string
+  alcoholPercentage?: number
+  country?: string
+  categoryLevel1?: string
+  categoryLevel2?: string
+  categoryLevel3?: string
+  assortmentText?: string
+  taste?: string
+  usage?: string
+  isOrganic?: boolean
+  isNews?: boolean
+  packagingLevel1?: string
+  assortment?: string
+  productLaunchDate?: string
+  restrictedParcelQuantity?: number
+  vintage?: string | null
+  imageUrl?: string
+}
+
+export async function createProduct(data: NewProductPayload): Promise<Product> {
+  const res = await authFetch('/api/admin/products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}))
+    throw new Error(d.error || 'Failed to create product')
+  }
+  return res.json()
+}
+
 export async function deleteAllProducts(): Promise<{ deleted: number }> {
   const res = await authFetch('/api/admin/products', { method: 'DELETE' })
   if (!res.ok) throw new Error(await res.text())

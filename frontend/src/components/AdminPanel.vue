@@ -3,7 +3,8 @@ import { ref, onMounted } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
-import { listUsers, createUser, updateUser, deleteUser, deleteAllProducts, debugSBProbe, type AuthUser } from '../api/client'
+import Checkbox from 'primevue/checkbox'
+import { listUsers, createUser, updateUser, deleteUser, deleteAllProducts, debugSBProbe, createProduct, type AuthUser, type NewProductPayload } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
@@ -122,6 +123,79 @@ async function doProbe() {
     probeError.value = e?.message || String(e)
   } finally {
     probeBusy.value = false
+  }
+}
+
+// Manually add a beer
+const showAddProduct = ref(false)
+const addingProduct = ref(false)
+const addProductError = ref<string | null>(null)
+const addProductSuccess = ref<string | null>(null)
+
+function emptyProductForm(): NewProductPayload {
+  return {
+    productId: '',
+    productNumber: '',
+    productNameBold: '',
+    productNameThin: '',
+    producerName: '',
+    price: undefined,
+    volume: undefined,
+    volumeText: '',
+    alcoholPercentage: undefined,
+    country: '',
+    categoryLevel1: '',
+    categoryLevel2: '',
+    categoryLevel3: '',
+    assortmentText: '',
+    taste: '',
+    usage: '',
+    isOrganic: false,
+    isNews: false,
+    packagingLevel1: '',
+    assortment: '',
+    productLaunchDate: '',
+    restrictedParcelQuantity: 0,
+    vintage: '',
+    imageUrl: '',
+  }
+}
+
+const newProduct = ref<NewProductPayload>(emptyProductForm())
+
+function toNumber(v: any): number | undefined {
+  if (v === '' || v === null || v === undefined) return undefined
+  const n = Number(v)
+  return Number.isFinite(n) ? n : undefined
+}
+
+async function doCreateProduct() {
+  addProductError.value = null
+  addProductSuccess.value = null
+  if (!newProduct.value.productNameBold?.trim()) {
+    addProductError.value = 'Name (bold) is required'
+    return
+  }
+  addingProduct.value = true
+  try {
+    const payload: NewProductPayload = {
+      ...newProduct.value,
+      productId: newProduct.value.productId?.trim() || undefined,
+      productNameThin: newProduct.value.productNameThin || null,
+      vintage: newProduct.value.vintage || null,
+      price: toNumber(newProduct.value.price),
+      volume: toNumber(newProduct.value.volume),
+      alcoholPercentage: toNumber(newProduct.value.alcoholPercentage),
+      restrictedParcelQuantity: toNumber(newProduct.value.restrictedParcelQuantity) ?? 0,
+    }
+    const created = await createProduct(payload)
+    addProductSuccess.value = `Added "${created.productNameBold}" (id ${created.productId})`
+    newProduct.value = emptyProductForm()
+    emit('productsChanged')
+  } catch (e: any) {
+    addProductError.value = e.message || String(e)
+  } finally {
+    addingProduct.value = false
   }
 }
 
@@ -275,6 +349,133 @@ onMounted(loadUsers)
           <summary>Raw JSON</summary>
           <pre>{{ JSON.stringify(probeResult, null, 2) }}</pre>
         </details>
+      </div>
+    </div>
+
+    <div class="add-product-zone">
+      <div class="add-product-header">
+        <h4>Manually add a beer</h4>
+        <Button :label="showAddProduct ? 'Hide form' : 'Show form'"
+          :icon="showAddProduct ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+          severity="secondary" text size="small" @click="showAddProduct = !showAddProduct" />
+      </div>
+      <p class="add-product-desc">
+        Add a product directly to the database with the same fields a sync would set.
+        Leave Product ID empty to auto-generate one.
+      </p>
+
+      <div v-if="showAddProduct" class="add-product-form">
+        <div class="ap-grid">
+          <div class="ap-field">
+            <label>Product ID</label>
+            <InputText v-model="newProduct.productId" placeholder="(auto)" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Product Number</label>
+            <InputText v-model="newProduct.productNumber" placeholder="e.g. 120115" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Name (bold) *</label>
+            <InputText v-model="newProduct.productNameBold" placeholder="Mariestads" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Name (thin)</label>
+            <InputText v-model="newProduct.productNameThin" placeholder="Export" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Producer</label>
+            <InputText v-model="newProduct.producerName" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Country</label>
+            <InputText v-model="newProduct.country" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Price (SEK)</label>
+            <InputText v-model="newProduct.price" type="number" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Volume (ml)</label>
+            <InputText v-model="newProduct.volume" type="number" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Volume text</label>
+            <InputText v-model="newProduct.volumeText" placeholder="33 cl" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Alcohol %</label>
+            <InputText v-model="newProduct.alcoholPercentage" type="number" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Category 1</label>
+            <InputText v-model="newProduct.categoryLevel1" placeholder="Öl" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Category 2</label>
+            <InputText v-model="newProduct.categoryLevel2" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Category 3</label>
+            <InputText v-model="newProduct.categoryLevel3" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Packaging</label>
+            <InputText v-model="newProduct.packagingLevel1" placeholder="Burk" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Assortment</label>
+            <InputText v-model="newProduct.assortment" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Assortment text</label>
+            <InputText v-model="newProduct.assortmentText" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Launch date</label>
+            <InputText v-model="newProduct.productLaunchDate" placeholder="YYYY-MM-DD" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Vintage</label>
+            <InputText v-model="newProduct.vintage" size="small" />
+          </div>
+          <div class="ap-field">
+            <label>Restricted parcel qty</label>
+            <InputText v-model="newProduct.restrictedParcelQuantity" type="number" size="small" />
+          </div>
+          <div class="ap-field ap-field-wide">
+            <label>Image URL</label>
+            <InputText v-model="newProduct.imageUrl" size="small" />
+          </div>
+          <div class="ap-field ap-field-wide">
+            <label>Taste</label>
+            <InputText v-model="newProduct.taste" size="small" />
+          </div>
+          <div class="ap-field ap-field-wide">
+            <label>Usage</label>
+            <InputText v-model="newProduct.usage" size="small" />
+          </div>
+          <div class="ap-field ap-checkboxes">
+            <label class="ap-check">
+              <Checkbox v-model="newProduct.isOrganic" :binary="true" /> Organic
+            </label>
+            <label class="ap-check">
+              <Checkbox v-model="newProduct.isNews" :binary="true" /> News
+            </label>
+          </div>
+        </div>
+
+        <div v-if="addProductError" class="error-msg" style="margin-top: 0.75rem;">{{ addProductError }}</div>
+        <div v-if="addProductSuccess" class="success-msg">{{ addProductSuccess }}</div>
+
+        <div class="ap-actions">
+          <Button label="Add product" icon="pi pi-plus" size="small"
+            :loading="addingProduct"
+            :disabled="!newProduct.productNameBold?.trim()"
+            @click="doCreateProduct" />
+          <Button label="Reset" icon="pi pi-refresh" severity="secondary" text size="small"
+            :disabled="addingProduct"
+            @click="newProduct = emptyProductForm(); addProductError = null; addProductSuccess = null" />
+        </div>
       </div>
     </div>
 
@@ -459,6 +660,85 @@ onMounted(loadUsers)
   cursor: pointer;
   color: var(--text-secondary);
   font-weight: 600;
+}
+
+.add-product-zone {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.add-product-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.add-product-header h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.add-product-desc {
+  margin: 0.35rem 0 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.ap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.6rem 0.75rem;
+}
+
+.ap-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ap-field-wide {
+  grid-column: span 2;
+}
+
+.ap-field label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.ap-checkboxes {
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+  align-self: end;
+  padding-bottom: 0.35rem;
+}
+
+.ap-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ap-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.success-msg {
+  color: var(--accent);
+  background: var(--accent-light);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
 }
 
 .probe-raw pre {
