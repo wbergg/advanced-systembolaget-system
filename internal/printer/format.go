@@ -28,13 +28,15 @@ func FormatRoll(username, producer, productBold, productThin, country, status st
 // FormatStatus returns a short slip noting a user's accept/veto outcome,
 // with a duration line showing how long the decision took.
 // Leading/trailing blank lines give visual breathing room above and below.
-func FormatStatus(username, action, createdAt, resolvedAt string) string {
+// decisionSeconds is the persisted accept/veto duration (1-decimal seconds);
+// nil omits the duration line.
+func FormatStatus(username, action string, decisionSeconds *float64) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n")
 	sb.WriteString(username)
 	sb.WriteString(" ")
 	sb.WriteString(action)
-	if dur := decisionDuration(createdAt, resolvedAt); dur != "" {
+	if dur := formatDecisionSeconds(decisionSeconds); dur != "" {
 		sb.WriteString("\nTime until ")
 		sb.WriteString(action)
 		sb.WriteString(": ")
@@ -44,33 +46,23 @@ func FormatStatus(username, action, createdAt, resolvedAt string) string {
 	return sb.String()
 }
 
-func decisionDuration(from, to string) string {
-	if from == "" || to == "" {
+func formatDecisionSeconds(s *float64) string {
+	if s == nil || *s < 0 {
 		return ""
 	}
-	t1, err1 := time.Parse(time.RFC3339, from)
-	t2, err2 := time.Parse(time.RFC3339, to)
-	if err1 != nil || err2 != nil {
-		return ""
-	}
-	return formatDuration(t2.Sub(t1))
-}
-
-func formatDuration(d time.Duration) string {
-	d = d.Round(time.Second)
-	h := d / time.Hour
-	d -= h * time.Hour
-	m := d / time.Minute
-	d -= m * time.Minute
-	s := d / time.Second
+	total := *s
+	h := int(total) / 3600
+	total -= float64(h * 3600)
+	m := int(total) / 60
+	secs := total - float64(m*60)
 
 	switch {
 	case h > 0:
-		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+		return fmt.Sprintf("%dh %dm %.1fs", h, m, secs)
 	case m > 0:
-		return fmt.Sprintf("%dm %ds", m, s)
+		return fmt.Sprintf("%dm %.1fs", m, secs)
 	default:
-		return fmt.Sprintf("%ds", s)
+		return fmt.Sprintf("%.1fs", secs)
 	}
 }
 

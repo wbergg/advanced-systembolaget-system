@@ -994,11 +994,7 @@ func acceptRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 			return
 		}
 		if turn, err := database.GetRollTurn(id, turnID); err == nil {
-			resolvedAt := ""
-			if turn.ResolvedAt != nil {
-				resolvedAt = *turn.ResolvedAt
-			}
-			p.SendAndCut(printer.FormatStatus(turn.Username, "accepted", turn.CreatedAt, resolvedAt) + "\n\n\n\n")
+			p.SendAndCut(printer.FormatStatus(turn.Username, "accepted", turn.DecisionSeconds) + "\n\n\n\n")
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
@@ -1027,11 +1023,7 @@ func vetoRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 			return
 		}
 		if turn, err := database.GetRollTurn(id, turnID); err == nil {
-			resolvedAt := ""
-			if turn.ResolvedAt != nil {
-				resolvedAt = *turn.ResolvedAt
-			}
-			p.Send(printer.FormatStatus(turn.Username, "vetoed", turn.CreatedAt, resolvedAt))
+			p.Send(printer.FormatStatus(turn.Username, "vetoed", turn.DecisionSeconds))
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
@@ -1457,11 +1449,7 @@ func publicAcceptRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc
 			return
 		}
 		if turn, err := database.GetRollTurn(ev.ID, turnID); err == nil {
-			resolvedAt := ""
-			if turn.ResolvedAt != nil {
-				resolvedAt = *turn.ResolvedAt
-			}
-			p.SendAndCut(printer.FormatStatus(turn.Username, "accepted", turn.CreatedAt, resolvedAt) + "\n\n\n")
+			p.SendAndCut(printer.FormatStatus(turn.Username, "accepted", turn.DecisionSeconds) + "\n\n\n")
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
@@ -1484,11 +1472,7 @@ func publicVetoRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 			return
 		}
 		if turn, err := database.GetRollTurn(ev.ID, turnID); err == nil {
-			resolvedAt := ""
-			if turn.ResolvedAt != nil {
-				resolvedAt = *turn.ResolvedAt
-			}
-			p.Send(printer.FormatStatus(turn.Username, "vetoed", turn.CreatedAt, resolvedAt))
+			p.Send(printer.FormatStatus(turn.Username, "vetoed", turn.DecisionSeconds))
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}

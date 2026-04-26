@@ -3,6 +3,7 @@ package db
 import (
 	"crypto/rand"
 	"fmt"
+	"math"
 	"math/big"
 	"time"
 )
@@ -24,21 +25,22 @@ type RollPoolItem struct {
 }
 
 type RollTurn struct {
-	ID              int     `json:"id"`
-	EventID         int     `json:"eventId"`
-	PoolID          int     `json:"poolId"`
-	UserID          int     `json:"userId"`
-	Username        string  `json:"username"`
-	ProductNameBold string  `json:"productNameBold"`
-	ProductNameThin *string `json:"productNameThin"`
-	ProducerName    string  `json:"producerName"`
-	Country         string  `json:"country"`
-	AlcoholPercent  float64 `json:"alcoholPercent"`
-	ImageURL        string  `json:"imageUrl"`
-	Status          string  `json:"status"`
-	CanVeto         bool    `json:"canVeto"`
-	CreatedAt       string  `json:"createdAt"`
-	ResolvedAt      *string `json:"resolvedAt,omitempty"`
+	ID              int      `json:"id"`
+	EventID         int      `json:"eventId"`
+	PoolID          int      `json:"poolId"`
+	UserID          int      `json:"userId"`
+	Username        string   `json:"username"`
+	ProductNameBold string   `json:"productNameBold"`
+	ProductNameThin *string  `json:"productNameThin"`
+	ProducerName    string   `json:"producerName"`
+	Country         string   `json:"country"`
+	AlcoholPercent  float64  `json:"alcoholPercent"`
+	ImageURL        string   `json:"imageUrl"`
+	Status          string   `json:"status"`
+	CanVeto         bool     `json:"canVeto"`
+	CreatedAt       string   `json:"createdAt"`
+	ResolvedAt      *string  `json:"resolvedAt,omitempty"`
+	DecisionSeconds *float64 `json:"decisionSeconds,omitempty"`
 }
 
 type VetoedItem struct {
@@ -283,10 +285,11 @@ func (db *DB) PerformRoll(eventID, targetUserID int) (*RollTurn, error) {
 func (db *DB) GetRollTurn(eventID, turnID int) (*RollTurn, error) {
 	var turn RollTurn
 	var resolvedAt *string
+	var decisionSeconds *float64
 	err := db.conn.QueryRow(`
 		SELECT rt.id, rt.event_id, rt.pool_id, rt.user_id, u.username,
 			p.name_bold, p.name_thin, p.producer_name, p.country, p.alcohol_pct, COALESCE(p.image_url, ''),
-			rt.status, rt.created_at, rt.resolved_at
+			rt.status, rt.created_at, rt.resolved_at, rt.decision_seconds
 		FROM roll_turns rt
 		JOIN users u ON rt.user_id = u.id
 		JOIN roll_pool rp ON rt.pool_id = rp.id
@@ -294,11 +297,12 @@ func (db *DB) GetRollTurn(eventID, turnID int) (*RollTurn, error) {
 		WHERE rt.event_id = ? AND rt.id = ?
 	`, eventID, turnID).Scan(&turn.ID, &turn.EventID, &turn.PoolID, &turn.UserID, &turn.Username,
 		&turn.ProductNameBold, &turn.ProductNameThin, &turn.ProducerName, &turn.Country, &turn.AlcoholPercent, &turn.ImageURL,
-		&turn.Status, &turn.CreatedAt, &resolvedAt)
+		&turn.Status, &turn.CreatedAt, &resolvedAt, &decisionSeconds)
 	if err != nil {
 		return nil, err
 	}
 	turn.ResolvedAt = resolvedAt
+	turn.DecisionSeconds = decisionSeconds
 	return &turn, nil
 }
 
@@ -310,8 +314,8 @@ func (db *DB) AcceptRoll(eventID, turnID int) error {
 	defer tx.Rollback()
 
 	var poolID, userID int
-	var status string
-	err = tx.QueryRow("SELECT pool_id, user_id, status FROM roll_turns WHERE id = ? AND event_id = ?", turnID, eventID).Scan(&poolID, &userID, &status)
+	var status, createdAt string
+	err = tx.QueryRow("SELECT pool_id, user_id, status, created_at FROM roll_turns WHERE id = ? AND event_id = ?", turnID, eventID).Scan(&poolID, &userID, &status, &createdAt)
 	if err != nil {
 		return fmt.Errorf("turn not found")
 	}
@@ -319,8 +323,10 @@ func (db *DB) AcceptRoll(eventID, turnID int) error {
 		return fmt.Errorf("turn is not pending")
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = tx.Exec("UPDATE roll_turns SET status = 'accepted', resolved_at = ? WHERE id = ?", now, turnID)
+	nowT := time.Now().UTC()
+	now := nowT.Format(time.RFC3339)
+	decisionSecs := decisionSecondsSince(createdAt, nowT)
+	_, err = tx.Exec("UPDATE roll_turns SET status = 'accepted', resolved_at = ?, decision_seconds = ? WHERE id = ?", now, decisionSecs, turnID)
 	if err != nil {
 		return err
 	}
@@ -340,8 +346,8 @@ func (db *DB) VetoRoll(eventID, turnID int) error {
 	defer tx.Rollback()
 
 	var poolID, userID int
-	var status string
-	err = tx.QueryRow("SELECT pool_id, user_id, status FROM roll_turns WHERE id = ? AND event_id = ?", turnID, eventID).Scan(&poolID, &userID, &status)
+	var status, createdAt string
+	err = tx.QueryRow("SELECT pool_id, user_id, status, created_at FROM roll_turns WHERE id = ? AND event_id = ?", turnID, eventID).Scan(&poolID, &userID, &status, &createdAt)
 	if err != nil {
 		return fmt.Errorf("turn not found")
 	}
@@ -368,8 +374,10 @@ func (db *DB) VetoRoll(eventID, turnID int) error {
 		return fmt.Errorf("this beer has already been vetoed and cannot be vetoed again")
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = tx.Exec("UPDATE roll_turns SET status = 'vetoed', resolved_at = ? WHERE id = ?", now, turnID)
+	nowT := time.Now().UTC()
+	now := nowT.Format(time.RFC3339)
+	decisionSecs := decisionSecondsSince(createdAt, nowT)
+	_, err = tx.Exec("UPDATE roll_turns SET status = 'vetoed', resolved_at = ?, decision_seconds = ? WHERE id = ?", now, decisionSecs, turnID)
 	if err != nil {
 		return err
 	}
@@ -379,6 +387,20 @@ func (db *DB) VetoRoll(eventID, turnID int) error {
 	}
 
 	return tx.Commit()
+}
+
+// decisionSecondsSince returns the elapsed seconds from createdAt (RFC3339)
+// to now, rounded to one decimal. Returns 0 if createdAt is unparseable.
+func decisionSecondsSince(createdAt string, now time.Time) float64 {
+	t, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return 0
+	}
+	secs := now.Sub(t).Seconds()
+	if secs < 0 {
+		secs = 0
+	}
+	return math.Round(secs*10) / 10
 }
 
 func (db *DB) UndoVeto(eventID, poolID int) error {

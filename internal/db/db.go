@@ -201,5 +201,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 	conn.Exec("ALTER TABLE events ADD COLUMN public INTEGER NOT NULL DEFAULT 0")
 	conn.Exec("UPDATE events SET public = 1 WHERE public_token IS NOT NULL AND public_token != ''")
 
+	// Migration: persisted accept/veto duration in seconds (1-decimal precision).
+	conn.Exec("ALTER TABLE roll_turns ADD COLUMN decision_seconds REAL")
+
 	return nil
 }
