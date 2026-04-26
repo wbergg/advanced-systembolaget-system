@@ -28,6 +28,7 @@ type Product struct {
 	Country         string  `json:"country"`
 	CategoryLevel1  string  `json:"categoryLevel1"`
 	CategoryLevel2  string  `json:"categoryLevel2"`
+	CategoryLevel3  string  `json:"categoryLevel3"`
 	AssortmentText  string  `json:"assortmentText"`
 	Taste           string  `json:"taste"`
 	Usage           string  `json:"usage"`

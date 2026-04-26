@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -57,11 +58,11 @@ func (db *DB) UpsertProducts(products []systembolaget.Product) error {
 		INSERT OR REPLACE INTO products (
 			product_id, product_number, name_bold, name_thin,
 			producer_name, price, volume, volume_text, alcohol_pct,
-			country, category_level1, category_level2, assortment_text,
-			taste, usage, is_organic, is_news, packaging_level1,
+			country, category_level1, category_level2, category_level3,
+			assortment_text, taste, usage, is_organic, is_news, packaging_level1,
 			assortment, product_launch_date, restricted_parcel_qty,
 			vintage, image_url, synced_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	`)
 	if err != nil {
 		return err
@@ -72,8 +73,8 @@ func (db *DB) UpsertProducts(products []systembolaget.Product) error {
 		_, err := stmt.Exec(
 			p.ProductID, p.ProductNumber, p.ProductNameBold, p.ProductNameThin,
 			p.ProducerName, p.Price, p.Volume, p.VolumeText, p.AlcoholPercent,
-			p.Country, p.CategoryLevel1, p.CategoryLevel2, p.AssortmentText,
-			p.Taste, p.Usage, p.IsOrganic, p.IsNews, p.PackagingLevel1,
+			p.Country, p.CategoryLevel1, p.CategoryLevel2, p.CategoryLevel3,
+			p.AssortmentText, p.Taste, p.Usage, p.IsOrganic, p.IsNews, p.PackagingLevel1,
 			p.Assortment, p.ProductLaunchDate, p.RestrictedParcelQuantity,
 			p.Vintage, p.ImageURL,
 		)
@@ -196,8 +197,8 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 	query := fmt.Sprintf(`
 		SELECT p.product_id, p.product_number, p.name_bold, p.name_thin,
 			p.producer_name, p.price, p.volume, p.volume_text, p.alcohol_pct,
-			p.country, p.category_level1, p.category_level2, p.assortment_text,
-			p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
+			p.country, p.category_level1, p.category_level2, p.category_level3,
+			p.assortment_text, p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
 			p.assortment, p.restricted_parcel_qty, p.vintage, p.image_url, n.note
 		FROM products p
 		LEFT JOIN notes n ON p.product_id = n.product_id
@@ -216,13 +217,15 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 	var products []ProductWithNote
 	for rows.Next() {
 		var p ProductWithNote
+		var categoryLevel3 sql.NullString
 		err := rows.Scan(
 			&p.ProductID, &p.ProductNumber, &p.ProductNameBold, &p.ProductNameThin,
 			&p.ProducerName, &p.Price, &p.Volume, &p.VolumeText, &p.AlcoholPercent,
-			&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &p.AssortmentText,
-			&p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
+			&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &categoryLevel3,
+			&p.AssortmentText, &p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
 			&p.Assortment, &p.RestrictedParcelQuantity, &p.Vintage, &p.ImageURL, &p.Note,
 		)
+		p.CategoryLevel3 = categoryLevel3.String
 		if err != nil {
 			return nil, 0, err
 		}
@@ -234,11 +237,12 @@ func (db *DB) ListProducts(f ListFilter) ([]ProductWithNote, int, error) {
 
 func (db *DB) GetProduct(id string) (*ProductWithNote, error) {
 	var p ProductWithNote
+	var categoryLevel3 sql.NullString
 	err := db.conn.QueryRow(`
 		SELECT p.product_id, p.product_number, p.name_bold, p.name_thin,
 			p.producer_name, p.price, p.volume, p.volume_text, p.alcohol_pct,
-			p.country, p.category_level1, p.category_level2, p.assortment_text,
-			p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
+			p.country, p.category_level1, p.category_level2, p.category_level3,
+			p.assortment_text, p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
 			p.assortment, p.restricted_parcel_qty, p.vintage, p.image_url, n.note
 		FROM products p
 		LEFT JOIN notes n ON p.product_id = n.product_id
@@ -246,23 +250,25 @@ func (db *DB) GetProduct(id string) (*ProductWithNote, error) {
 	`, id).Scan(
 		&p.ProductID, &p.ProductNumber, &p.ProductNameBold, &p.ProductNameThin,
 		&p.ProducerName, &p.Price, &p.Volume, &p.VolumeText, &p.AlcoholPercent,
-		&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &p.AssortmentText,
-		&p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
+		&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &categoryLevel3,
+		&p.AssortmentText, &p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
 		&p.Assortment, &p.RestrictedParcelQuantity, &p.Vintage, &p.ImageURL, &p.Note,
 	)
 	if err != nil {
 		return nil, err
 	}
+	p.CategoryLevel3 = categoryLevel3.String
 	return &p, nil
 }
 
 func (db *DB) GetProductByNumber(number string) (*ProductWithNote, error) {
 	var p ProductWithNote
+	var categoryLevel3 sql.NullString
 	err := db.conn.QueryRow(`
 		SELECT p.product_id, p.product_number, p.name_bold, p.name_thin,
 			p.producer_name, p.price, p.volume, p.volume_text, p.alcohol_pct,
-			p.country, p.category_level1, p.category_level2, p.assortment_text,
-			p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
+			p.country, p.category_level1, p.category_level2, p.category_level3,
+			p.assortment_text, p.taste, p.usage, p.is_organic, p.is_news, p.packaging_level1,
 			p.assortment, p.restricted_parcel_qty, p.vintage, p.image_url, n.note
 		FROM products p
 		LEFT JOIN notes n ON p.product_id = n.product_id
@@ -270,13 +276,14 @@ func (db *DB) GetProductByNumber(number string) (*ProductWithNote, error) {
 	`, number).Scan(
 		&p.ProductID, &p.ProductNumber, &p.ProductNameBold, &p.ProductNameThin,
 		&p.ProducerName, &p.Price, &p.Volume, &p.VolumeText, &p.AlcoholPercent,
-		&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &p.AssortmentText,
-		&p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
+		&p.Country, &p.CategoryLevel1, &p.CategoryLevel2, &categoryLevel3,
+		&p.AssortmentText, &p.Taste, &p.Usage, &p.IsOrganic, &p.IsNews, &p.PackagingLevel1,
 		&p.Assortment, &p.RestrictedParcelQuantity, &p.Vintage, &p.ImageURL, &p.Note,
 	)
 	if err != nil {
 		return nil, err
 	}
+	p.CategoryLevel3 = categoryLevel3.String
 	return &p, nil
 }
 

@@ -61,6 +61,7 @@ func initSchema(conn *sql.DB) error {
 			country          TEXT,
 			category_level1  TEXT,
 			category_level2  TEXT,
+			category_level3  TEXT,
 			assortment_text  TEXT,
 			taste            TEXT,
 			usage            TEXT,
@@ -203,6 +204,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 	// Migration: persisted accept/veto duration in seconds (1-decimal precision).
 	conn.Exec("ALTER TABLE roll_turns ADD COLUMN decision_seconds REAL")
+
+	conn.Exec("ALTER TABLE products ADD COLUMN category_level3 TEXT")
 
 	return nil
 }
