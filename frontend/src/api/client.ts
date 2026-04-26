@@ -455,6 +455,7 @@ export interface RollPoolItem {
   productNameBold: string
   productNameThin: string | null
   producerName: string
+  alcoholPercent: number
   imageUrl: string
   consumed: boolean
   consumedByUserId?: number
@@ -472,6 +473,7 @@ export interface RollTurn {
   productNameBold: string
   productNameThin: string | null
   producerName: string
+  alcoholPercent: number
   imageUrl: string
   status: 'pending' | 'accepted' | 'vetoed'
   canVeto: boolean
@@ -484,6 +486,7 @@ export interface VetoedItem {
   productNameBold: string
   productNameThin: string | null
   producerName: string
+  alcoholPercent: number
   imageUrl: string
   vetoedByName: string
   vetoedAt: string
