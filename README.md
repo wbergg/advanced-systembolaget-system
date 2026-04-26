@@ -16,7 +16,11 @@ Create a `config.json` (see `config_example.json`):
   "admin_user": "admin",
   "admin_pass": "changeme",
   "listen_ip": "0.0.0.0",
-  "port": "8080"
+  "port": "8080",
+  "printer": {
+    "enabled": false,
+    "url": ""
+  }
 }
 ```
 
@@ -79,9 +83,11 @@ Organize tastings: create an event, invite users, add beers, and score each prod
 
 ### Roll game
 
-A game mode for events: add products to a pool, roll to randomly draw one, then accept or veto the pick. Each user gets one veto. Admins can undo vetoes/consumed items and reset the game.
+A game mode for events: add products to a pool, roll to randomly draw one, then accept or veto the pick. Each user gets one veto, and each item can only be vetoed once. The host or an admin can undo vetoes, undo consumed items, replace the pool from a shared list, or reset the game.
 
-Only one roll event can be public at a time. Publishing an event makes it available at `/roll` without authentication. If no event is published, the page shows "Currently no active event."
+Decision time (seconds between roll and accept/veto) is recorded per turn and exposed in the API. Optional receipt-printer integration prints a slip for each roll, accept, and veto (see `printer` config below).
+
+Only one roll event can be public at a time. Publishing an event makes it available at `/roll` without authentication. If no event is published, the page shows "Currently no active event." Admins can additionally hide an event from the regular event list.
 
 #### Public roll API
 
@@ -94,7 +100,7 @@ The public roll endpoints require no authentication, so external apps can integr
 | `POST` | `/api/public/roll/:turnId/accept` | Accept the pending roll |
 | `POST` | `/api/public/roll/:turnId/veto` | Veto the pending roll |
 
-`GET /api/public/roll` returns the event name, participant list, pool/consumed/vetoed counts, and the current pending turn (including `canVeto` to indicate whether the roll can be vetoed). Returns `404` when no event is published.
+`GET /api/public/roll` returns the event name, participant list, pool/consumed/vetoed counts, and the current pending turn (including `canVeto`, country, ABV%, and `decisionSeconds` once resolved). Returns `404` when no event is published.
 
 ### Comments & notes
 
@@ -115,9 +121,9 @@ All endpoints are under `/api/`. Authentication uses JWT tokens (24h expiry).
 | Comments | `GET /products/:id/comments`, `POST /products/:id/comments` |
 | Sync | `POST /sync` (SSE), `POST /key/refresh`, `GET /key/status` |
 | Events | CRUD on `/events`, attendees, beers, scores, list import |
-| Roll game | `/events/:id/roll` (state, roll, accept, veto, reset), `/public/roll` (public access) |
+| Roll game | `/events/:id/roll` (state, roll, accept, veto, reset, undo veto/consumed), `/events/:id/public` (publish), `/events/:id/visibility` (hide), `/public/roll` (public access) |
 | Shared lists | CRUD on `/shared-lists`, items, locking, sharing, public view at `/public/shared-list/:uuid` |
-| Admin | `/admin/users` CRUD, `POST /admin/impersonate/:id`, `DELETE /admin/comments/:id`, `DELETE /admin/products` |
+| Admin | `/admin/users` CRUD, `POST /admin/impersonate/:id`, `DELETE /admin/comments/:id`, `DELETE /admin/products`, `GET /admin/debug/sb-probe/:number` |
 
 ## CLI tool
 
@@ -154,7 +160,11 @@ Add one line to `paramMappings` in `internal/systembolaget/params.go`:
   "admin_user": "admin",
   "admin_pass": "changeme",
   "listen_ip": "0.0.0.0",
-  "port": "8080"
+  "port": "8080",
+  "printer": {
+    "enabled": false,
+    "url": "http://printer.local/cgi-bin/print"
+  }
 }
 ```
 
@@ -165,3 +175,9 @@ Add one line to `paramMappings` in `internal/systembolaget/params.go`:
 | `admin_pass` | Initial admin password (hashed with bcrypt on seed) | *required* |
 | `listen_ip` | IP address to bind to | `0.0.0.0` |
 | `port` | Port to listen on | `8080` |
+| `printer.enabled` | Enable receipt-printer integration for roll events | `false` |
+| `printer.url` | HTTP endpoint that accepts `stext`/`print_text`/`cut_command` form posts | |
+
+### Printer integration
+
+When enabled, the server queues a print job for each roll, accept, and veto in the roll game. Jobs are POSTed as `application/x-www-form-urlencoded` to `printer.url`. Jobs are processed serially by a single worker, with a short delay before paper-cut commands so the print buffer can flush. If the printer is unreachable, jobs are logged and dropped — they don't block the API.
