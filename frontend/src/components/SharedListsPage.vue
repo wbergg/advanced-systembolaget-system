@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Dialog from 'primevue/dialog'
@@ -337,6 +337,14 @@ async function doJsonImport() {
 }
 
 defineExpose({ loadLists, refreshActive })
+
+watch(() => authStore.user?.id, (id, prev) => {
+  if (id === prev) return
+  activeList.value = null
+  lists.value = []
+  emit('update:activeId', undefined)
+  loadLists()
+})
 
 onMounted(loadLists)
 </script>
