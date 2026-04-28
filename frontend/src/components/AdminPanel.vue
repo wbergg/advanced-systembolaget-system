@@ -132,17 +132,24 @@ const addingProduct = ref(false)
 const addProductError = ref<string | null>(null)
 const addProductSuccess = ref<string | null>(null)
 
-function emptyProductForm(): NewProductPayload {
+type ProductForm = Omit<NewProductPayload, 'price' | 'volume' | 'alcoholPercentage' | 'restrictedParcelQuantity'> & {
+  price?: string
+  volume?: string
+  alcoholPercentage?: string
+  restrictedParcelQuantity?: string
+}
+
+function emptyProductForm(): ProductForm {
   return {
     productId: '',
     productNumber: '',
     productNameBold: '',
     productNameThin: '',
     producerName: '',
-    price: undefined,
-    volume: undefined,
+    price: '',
+    volume: '',
     volumeText: '',
-    alcoholPercentage: undefined,
+    alcoholPercentage: '',
     country: '',
     categoryLevel1: '',
     categoryLevel2: '',
@@ -155,13 +162,13 @@ function emptyProductForm(): NewProductPayload {
     packagingLevel1: '',
     assortment: '',
     productLaunchDate: '',
-    restrictedParcelQuantity: 0,
+    restrictedParcelQuantity: '',
     vintage: '',
     imageUrl: '',
   }
 }
 
-const newProduct = ref<NewProductPayload>(emptyProductForm())
+const newProduct = ref<ProductForm>(emptyProductForm())
 
 function toNumber(v: any): number | undefined {
   if (v === '' || v === null || v === undefined) return undefined
