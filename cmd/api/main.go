@@ -126,6 +126,8 @@ func main() {
 			authed.GET("/events/:id", getEventHandler(database))
 			authed.PATCH("/events/:id", updateEventHandler(database))
 			authed.DELETE("/events/:id", deleteEventHandler(database))
+			authed.POST("/events/:id/archive", archiveEventHandler(database))
+			authed.POST("/events/:id/unarchive", unarchiveEventHandler(database))
 			authed.PATCH("/events/:id/lock", setEventLockedHandler(database))
 			authed.POST("/events/:id/invite", inviteToEventHandler(database))
 			authed.DELETE("/events/:id/invite/:userId", uninviteFromEventHandler(database))
@@ -183,6 +185,7 @@ func main() {
 			admin.DELETE("/products/:id", deleteProductHandler(database))
 			admin.DELETE("/products", deleteAllProductsHandler(database))
 			admin.GET("/debug/sb-probe/:number", debugSBProbe())
+			admin.GET("/events/archived", listArchivedEventsHandler(database))
 		}
 	}
 
@@ -726,6 +729,56 @@ func deleteEventHandler(database *db.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func archiveEventHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
+			return
+		}
+		if err := database.ArchiveEvent(id, claims.UserID, claims.Role == "admin"); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func unarchiveEventHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := auth.ClaimsFromContext(c)
+		if claims.Role != "admin" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+			return
+		}
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
+			return
+		}
+		if err := database.UnarchiveEvent(id); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func listArchivedEventsHandler(database *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		events, err := database.ListArchivedEvents()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if events == nil {
+			events = []db.Event{}
+		}
+		c.JSON(http.StatusOK, events)
 	}
 }
 

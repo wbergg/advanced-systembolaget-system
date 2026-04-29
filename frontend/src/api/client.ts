@@ -383,6 +383,7 @@ export interface Event {
   type: 'tasting' | 'roll'
   hidden: boolean
   public?: boolean
+  archivedAt?: string | null
   createdAt: string
   attendees?: EventAttendee[]
   beers?: EventBeer[]
@@ -425,6 +426,22 @@ export async function updateEvent(id: number, name: string, description: string,
 export async function deleteEvent(id: number): Promise<void> {
   const res = await authFetch(`/api/events/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(await res.text())
+}
+
+export async function archiveEvent(id: number): Promise<void> {
+  const res = await authFetch(`/api/events/${id}/archive`, { method: 'POST' })
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Failed to archive event') }
+}
+
+export async function unarchiveEvent(id: number): Promise<void> {
+  const res = await authFetch(`/api/events/${id}/unarchive`, { method: 'POST' })
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Failed to unarchive event') }
+}
+
+export async function listArchivedEvents(): Promise<Event[]> {
+  const res = await authFetch('/api/admin/events/archived')
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
 }
 
 export async function setEventLocked(eventId: number, locked: boolean): Promise<void> {

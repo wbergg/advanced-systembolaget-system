@@ -4,8 +4,9 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import Checkbox from 'primevue/checkbox'
-import { listUsers, createUser, updateUser, deleteUser, deleteAllProducts, debugSBProbe, createProduct, type AuthUser, type NewProductPayload } from '../api/client'
+import { listUsers, createUser, updateUser, deleteUser, deleteAllProducts, debugSBProbe, createProduct, listArchivedEvents, type AuthUser, type NewProductPayload, type Event } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import EventDetail from './EventDetail.vue'
 
 const authStore = useAuthStore()
 const emit = defineEmits<{ close: []; productsChanged: [] }>()
@@ -221,11 +222,46 @@ async function doPurgeProducts() {
   }
 }
 
-onMounted(loadUsers)
+// Archived events
+const archivedEvents = ref<Event[]>([])
+const archivedLoading = ref(false)
+const archivedError = ref<string | null>(null)
+const activeArchivedId = ref<number | null>(null)
+
+async function loadArchived() {
+  archivedLoading.value = true
+  archivedError.value = null
+  try {
+    archivedEvents.value = await listArchivedEvents()
+  } catch (e: any) {
+    archivedError.value = e?.message || String(e)
+  } finally {
+    archivedLoading.value = false
+  }
+}
+
+function openArchived(id: number) {
+  activeArchivedId.value = id
+}
+
+function backFromArchived() {
+  activeArchivedId.value = null
+  loadArchived()
+}
+
+function formatArchivedAt(s?: string | null): string {
+  if (!s) return ''
+  try { return new Date(s).toLocaleString() } catch { return s }
+}
+
+onMounted(() => { loadUsers(); loadArchived() })
 </script>
 
 <template>
-  <div class="card">
+  <div v-if="activeArchivedId !== null">
+    <EventDetail :eventId="activeArchivedId" @back="backFromArchived" />
+  </div>
+  <div v-else class="card">
     <div class="card-header">
       <h3>Admin &mdash; Users</h3>
       <Button icon="pi pi-times" severity="secondary" text rounded size="small" @click="$emit('close')" />
@@ -486,6 +522,38 @@ onMounted(loadUsers)
       </div>
     </div>
 
+    <div class="archived-zone">
+      <div class="archived-header">
+        <h4>Archived Events</h4>
+        <Button icon="pi pi-refresh" severity="secondary" text size="small" :loading="archivedLoading" @click="loadArchived" title="Refresh" />
+      </div>
+      <p class="archived-desc">
+        Events archived by their owner are hidden from all non-admin users but data is preserved here.
+      </p>
+      <div v-if="archivedError" class="error-msg">{{ archivedError }}</div>
+      <table v-if="archivedEvents.length > 0" class="clean-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Owner</th>
+            <th>Event date</th>
+            <th>Archived</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="ev in archivedEvents" :key="ev.id" class="archived-row" @click="openArchived(ev.id)">
+            <td style="font-weight: 600;">{{ ev.name }}</td>
+            <td>{{ ev.type }}</td>
+            <td>{{ ev.ownerName }}</td>
+            <td>{{ ev.eventDate || '-' }}</td>
+            <td>{{ formatArchivedAt(ev.archivedAt) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else-if="!archivedLoading" class="empty-state">No archived events.</div>
+    </div>
+
     <div class="danger-zone">
       <h4>Danger Zone</h4>
       <div class="danger-row">
@@ -546,6 +614,38 @@ onMounted(loadUsers)
   padding: 0.75rem 0;
   text-align: center;
   font-size: 0.875rem;
+}
+
+.archived-zone {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.archived-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.archived-header h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.archived-desc {
+  margin: 0.35rem 0 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.archived-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.archived-row:hover {
+  background: var(--bg-muted);
 }
 
 .danger-zone {

@@ -217,7 +217,9 @@ onUnmounted(() => {
             <div v-if="state.pendingTurn.productNameThin" class="beer-subtitle">
               {{ state.pendingTurn.productNameThin }}
             </div>
-            <div class="beer-producer">{{ state.pendingTurn.producerName }}</div>
+            <div class="beer-producer">
+              {{ state.pendingTurn.producerName }}<span v-if="state.pendingTurn.alcoholPercent"> · {{ state.pendingTurn.alcoholPercent }}%</span>
+            </div>
           </div>
         </div>
 
@@ -273,7 +275,7 @@ onUnmounted(() => {
           <div class="consumed-info">
             <span class="consumed-name">{{ item.productNameBold }}</span>
             <span class="consumed-meta">
-              vetoed by <strong>{{ item.vetoedByName }}</strong> — {{ formatDate(item.vetoedAt) }}
+              <span v-if="item.alcoholPercent">{{ item.alcoholPercent }}% · </span>vetoed by <strong>{{ item.vetoedByName }}</strong> — {{ formatDate(item.vetoedAt) }}
             </span>
           </div>
           <i v-if="canManage" class="pi pi-undo consumed-undo" title="Undo veto — restore veto allowance" @click="doUndoVeto(item.poolId)"></i>
@@ -296,7 +298,7 @@ onUnmounted(() => {
           <div class="consumed-info">
             <span class="consumed-name">{{ item.productNameBold }}</span>
             <span class="consumed-meta">
-              consumed by <strong>{{ item.consumedByName }}</strong> — {{ formatDate(item.consumedAt) }}
+              <span v-if="item.alcoholPercent">{{ item.alcoholPercent }}% · </span>consumed by <strong>{{ item.consumedByName }}</strong> — {{ formatDate(item.consumedAt) }}
             </span>
           </div>
           <i v-if="canManage" class="pi pi-undo consumed-undo" title="Undo — put back in pool" @click="doUndo(item.id)"></i>

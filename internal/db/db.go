@@ -207,5 +207,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 	conn.Exec("ALTER TABLE products ADD COLUMN category_level3 TEXT")
 
+	// Migration: archived events (preserve roll/score history without deletion)
+	conn.Exec("ALTER TABLE events ADD COLUMN archived_at DATETIME")
+
 	return nil
 }

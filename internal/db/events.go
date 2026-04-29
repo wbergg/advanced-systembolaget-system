@@ -17,6 +17,7 @@ type Event struct {
 	Type          string          `json:"type"`
 	Hidden        bool            `json:"hidden"`
 	Public        bool            `json:"public"`
+	ArchivedAt    *time.Time      `json:"archivedAt,omitempty"`
 	CreatedAt     time.Time       `json:"createdAt"`
 	Attendees     []EventAttendee `json:"attendees,omitempty"`
 	Beers         []EventBeer     `json:"beers,omitempty"`
@@ -58,8 +59,12 @@ func (db *DB) CanAccessEvent(eventID, userID int, isAdmin bool) (isOwner bool, e
 
 func (db *DB) canAccessEvent(eventID, userID int) (isOwner bool, err error) {
 	var ownerID int
-	err = db.conn.QueryRow("SELECT user_id FROM events WHERE id = ?", eventID).Scan(&ownerID)
+	var archivedAt sql.NullTime
+	err = db.conn.QueryRow("SELECT user_id, archived_at FROM events WHERE id = ?", eventID).Scan(&ownerID, &archivedAt)
 	if err != nil {
+		return false, fmt.Errorf("event not found")
+	}
+	if archivedAt.Valid {
 		return false, fmt.Errorf("event not found")
 	}
 	if ownerID == userID {
@@ -85,6 +90,7 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 		SELECT e.id, e.name, e.description, e.event_date,
 			e.user_id, COALESCE(u.username, ''), e.locked,
 			e.type, e.hidden, e.public,
+			e.archived_at,
 			e.created_at,
 			(SELECT COUNT(*) FROM event_attendees WHERE event_id = e.id) AS attendee_count,
 			CASE WHEN e.type = 'roll'
@@ -97,6 +103,7 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 		       OR e.user_id = ?
 		       OR e.id IN (SELECT event_id FROM event_attendees WHERE user_id = ?))
 		  AND (e.hidden = 0 OR ? = 1)
+		  AND e.archived_at IS NULL
 		ORDER BY e.created_at DESC
 	`, adminVal, userID, userID, adminVal)
 	if err != nil {
@@ -107,12 +114,18 @@ func (db *DB) ListEvents(userID int, isAdmin bool) ([]Event, error) {
 	var events []Event
 	for rows.Next() {
 		var ev Event
+		var archivedAt sql.NullTime
 		if err := rows.Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
 			&ev.OwnerID, &ev.OwnerName, &ev.Locked,
 			&ev.Type, &ev.Hidden, &ev.Public,
+			&archivedAt,
 			&ev.CreatedAt,
 			&ev.AttendeeCount, &ev.BeerCount); err != nil {
 			return nil, err
+		}
+		if archivedAt.Valid {
+			t := archivedAt.Time
+			ev.ArchivedAt = &t
 		}
 		events = append(events, ev)
 	}
@@ -152,23 +165,33 @@ func (db *DB) GetEvent(id, userID int, isAdmin bool) (*Event, error) {
 	}
 
 	var ev Event
+	var archivedAt sql.NullTime
 	err := db.conn.QueryRow(`
 		SELECT e.id, e.name, e.description, e.event_date,
 			e.user_id, COALESCE(u.username, ''), e.locked,
 			e.type, e.hidden, e.public,
-			e.created_at
+			e.archived_at, e.created_at
 		FROM events e LEFT JOIN users u ON e.user_id = u.id
 		WHERE e.id = ?
 	`, id).Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
 		&ev.OwnerID, &ev.OwnerName, &ev.Locked,
 		&ev.Type, &ev.Hidden, &ev.Public,
-		&ev.CreatedAt)
+		&archivedAt, &ev.CreatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		ev.ArchivedAt = &t
 	}
 
 	// Hidden events only accessible by admins
 	if ev.Hidden && !isAdmin {
+		return nil, fmt.Errorf("event not found")
+	}
+
+	// Archived events only accessible by admins
+	if ev.ArchivedAt != nil && !isAdmin {
 		return nil, fmt.Errorf("event not found")
 	}
 
@@ -477,7 +500,7 @@ func (db *DB) GetPublicEvent() (*Event, error) {
 			e.user_id, COALESCE(u.username, ''), e.locked,
 			e.type, e.hidden, e.public, e.created_at
 		FROM events e LEFT JOIN users u ON e.user_id = u.id
-		WHERE e.public = 1 AND e.type = 'roll'
+		WHERE e.public = 1 AND e.type = 'roll' AND e.archived_at IS NULL
 	`).Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
 		&ev.OwnerID, &ev.OwnerName, &ev.Locked,
 		&ev.Type, &ev.Hidden, &ev.Public, &ev.CreatedAt)
@@ -505,4 +528,83 @@ func (db *DB) GetPublicEvent() (*Event, error) {
 	ev.AttendeeCount = len(ev.Attendees)
 
 	return &ev, nil
+}
+
+func (db *DB) ArchiveEvent(eventID, userID int, isAdmin bool) error {
+	var res sql.Result
+	var err error
+	if isAdmin {
+		res, err = db.conn.Exec(
+			"UPDATE events SET archived_at = CURRENT_TIMESTAMP, public = 0 WHERE id = ? AND archived_at IS NULL",
+			eventID)
+	} else {
+		res, err = db.conn.Exec(
+			"UPDATE events SET archived_at = CURRENT_TIMESTAMP, public = 0 WHERE id = ? AND user_id = ? AND archived_at IS NULL",
+			eventID, userID)
+	}
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("event not found, already archived, or not owned by you")
+	}
+	return nil
+}
+
+func (db *DB) UnarchiveEvent(eventID int) error {
+	res, err := db.conn.Exec(
+		"UPDATE events SET archived_at = NULL WHERE id = ? AND archived_at IS NOT NULL",
+		eventID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("event not found or not archived")
+	}
+	return nil
+}
+
+func (db *DB) ListArchivedEvents() ([]Event, error) {
+	rows, err := db.conn.Query(`
+		SELECT e.id, e.name, e.description, e.event_date,
+			e.user_id, COALESCE(u.username, ''), e.locked,
+			e.type, e.hidden, e.public,
+			e.archived_at,
+			e.created_at,
+			(SELECT COUNT(*) FROM event_attendees WHERE event_id = e.id) AS attendee_count,
+			CASE WHEN e.type = 'roll'
+				THEN (SELECT COUNT(*) FROM roll_pool WHERE event_id = e.id)
+				ELSE (SELECT COUNT(*) FROM event_beers WHERE event_id = e.id)
+			END AS beer_count
+		FROM events e
+		LEFT JOIN users u ON e.user_id = u.id
+		WHERE e.archived_at IS NOT NULL
+		ORDER BY e.archived_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []Event
+	for rows.Next() {
+		var ev Event
+		var archivedAt sql.NullTime
+		if err := rows.Scan(&ev.ID, &ev.Name, &ev.Description, &ev.EventDate,
+			&ev.OwnerID, &ev.OwnerName, &ev.Locked,
+			&ev.Type, &ev.Hidden, &ev.Public,
+			&archivedAt,
+			&ev.CreatedAt,
+			&ev.AttendeeCount, &ev.BeerCount); err != nil {
+			return nil, err
+		}
+		if archivedAt.Valid {
+			t := archivedAt.Time
+			ev.ArchivedAt = &t
+		}
+		events = append(events, ev)
+	}
+	return events, rows.Err()
 }

@@ -10,7 +10,7 @@ import {
   getEvent, setEventLocked, inviteToEvent, uninviteFromEvent,
   importSharedListToEvent, removeBeerFromEvent, setScore, deleteScore,
   listAllUsers, listSharedLists, setEventHidden, toggleEventPublic,
-  deleteEvent,
+  deleteEvent, archiveEvent, unarchiveEvent,
   type Event, type EventBeer, type ShareUser, type SharedList
 } from '../api/client'
 
@@ -46,6 +46,12 @@ function canEdit() {
 
 const isRoll = computed(() => event.value?.type === 'roll')
 const isAdminUser = computed(() => authStore.user?.role === 'admin')
+const isArchived = computed(() => !!event.value?.archivedAt)
+
+const archivedDate = computed(() => {
+  if (!event.value?.archivedAt) return ''
+  try { return new Date(event.value.archivedAt).toLocaleString() } catch { return event.value.archivedAt }
+})
 
 async function toggleHidden() {
   if (!event.value) return
@@ -111,6 +117,27 @@ async function doDeleteEvent() {
   if (!confirm(`Delete event "${event.value.name}"? This cannot be undone.`)) return
   await deleteEvent(event.value.id)
   emit('back')
+}
+
+async function doArchive() {
+  if (!event.value) return
+  if (!confirm(`Archive event "${event.value.name}"? It will be hidden from all non-admin users. Data is preserved and only visible to admins.`)) return
+  try {
+    await archiveEvent(event.value.id)
+    emit('back')
+  } catch (e: any) {
+    alert(e?.message || 'Failed to archive event')
+  }
+}
+
+async function doUnarchive() {
+  if (!event.value) return
+  try {
+    await unarchiveEvent(event.value.id)
+    await loadEvent()
+  } catch (e: any) {
+    alert(e?.message || 'Failed to unarchive event')
+  }
 }
 
 // Invite
@@ -233,12 +260,19 @@ onMounted(loadEvent)
           <Button v-if="isRoll && isAdminUser" :label="event.hidden ? 'Reveal' : 'Hide'" :icon="event.hidden ? 'pi pi-eye' : 'pi pi-eye-slash'" size="small" :severity="event.hidden ? 'success' : 'warn'" @click="toggleHidden" />
           <Button v-if="canEdit()" :label="event.locked ? 'Unlock' : 'Lock'" :icon="event.locked ? 'pi pi-lock-open' : 'pi pi-lock'" size="small" :severity="event.locked ? 'warn' : 'secondary'" @click="toggleLock" />
           <Button v-if="isOwner()" label="Invite" icon="pi pi-user-plus" size="small" severity="secondary" @click="openInviteDialog" />
-          <Button v-if="canEdit() && !event.locked" label="Import List" icon="pi pi-download" size="small" severity="secondary" @click="openImportDialog" />
-          <Button v-if="canEdit()" label="Delete" icon="pi pi-trash" size="small" severity="danger" @click="doDeleteEvent" />
+          <Button v-if="canEdit() && !event.locked && !isArchived" label="Import List" icon="pi pi-download" size="small" severity="secondary" @click="openImportDialog" />
+          <Button v-if="canEdit() && !isArchived" label="Archive" icon="pi pi-box" size="small" severity="warn" @click="doArchive" />
+          <Button v-if="isAdminUser && isArchived" label="Unarchive" icon="pi pi-replay" size="small" severity="success" @click="doUnarchive" />
+          <Button v-if="isAdminUser && isArchived" label="Delete permanently" icon="pi pi-trash" size="small" severity="danger" @click="doDeleteEvent" />
+          <Button v-if="canEdit() && !isArchived" label="Delete" icon="pi pi-trash" size="small" severity="danger" @click="doDeleteEvent" />
         </div>
       </div>
 
       <p v-if="event.description" class="detail-desc">{{ event.description }}</p>
+
+      <div v-if="isArchived" class="archived-banner">
+        <i class="pi pi-box"></i> Archived {{ archivedDate }} — visible to admins only.
+      </div>
 
       <div v-if="event.hidden" class="hidden-banner">
         <i class="pi pi-eye-slash"></i> This event is hidden from participants.
@@ -393,6 +427,20 @@ onMounted(loadEvent)
   background: var(--purple-light);
   color: var(--purple);
   border: 1px solid #c4b5fd;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.archived-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #f3f4f6;
+  color: #4b5563;
+  border: 1px solid #d1d5db;
   border-radius: 6px;
   padding: 0.5rem 1rem;
   margin-bottom: 0.75rem;
