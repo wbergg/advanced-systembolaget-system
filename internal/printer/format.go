@@ -6,11 +6,28 @@ import (
 	"time"
 )
 
+const logo = `
+* * * * * * * * * * * * * * * * * *
+ ____  ____  ____    .---------.
+| __ )|  _ \|  _ \   |  ~ ~ ~  |==|
+|  _ \| |_) | | | |  | RANDOM  |  |
+| |_) |  _ <| |_| |  |  BEER   |==|
+|____/|_| \_\____/   |         |
+                     '---------'
+* * * * * * * * * * * * * * * * * *
+`
+
+func writeLogo(sb *strings.Builder) {
+	sb.WriteString(logo)
+	sb.WriteString("\n")
+}
+
 // FormatRoll returns a single receipt string for a roll event.
 // Goes in full to the stext field.
 func FormatRoll(username, producer, productBold, productThin, country, status string) string {
 	var sb strings.Builder
 	//sb.WriteString("\n\n")
+	writeLogo(&sb)
 	sb.WriteString(time.Now().Format("2006-01-02 15:04:05"))
 	sb.WriteString("\n")
 	sb.WriteString(username)
