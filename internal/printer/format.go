@@ -26,7 +26,7 @@ func writeLogo(sb *strings.Builder) {
 // Goes in full to the stext field.
 func FormatRoll(username, producer, productBold, productThin, country, status string) string {
 	var sb strings.Builder
-	//sb.WriteString("\n\n")
+	sb.WriteString("\n\n")
 	writeLogo(&sb)
 	sb.WriteString(time.Now().Format("2006-01-02 15:04:05"))
 	sb.WriteString("\n")
