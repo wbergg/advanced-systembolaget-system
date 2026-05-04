@@ -1054,7 +1054,9 @@ func performRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		p.Send(formatTurnReceipt(turn))
+		if pub, _ := database.IsEventPublic(id); pub {
+			p.Send(formatTurnReceipt(turn))
+		}
 		c.JSON(http.StatusOK, turn)
 	}
 }
@@ -1081,8 +1083,10 @@ func acceptRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if turn, err := database.GetRollTurn(id, turnID); err == nil {
-			p.SendAndCut(printer.FormatStatus(turn.Username, "accepted", turn.DecisionSeconds) + "\n\n\n\n")
+		if pub, _ := database.IsEventPublic(id); pub {
+			if turn, err := database.GetRollTurn(id, turnID); err == nil {
+				p.SendAndCut(printer.FormatStatus(turn.Username, "accepted", turn.DecisionSeconds) + "\n\n\n\n")
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
@@ -1110,8 +1114,10 @@ func vetoRollHandler(database *db.DB, p *printer.Client) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if turn, err := database.GetRollTurn(id, turnID); err == nil {
-			p.Send(printer.FormatStatus(turn.Username, "vetoed", turn.DecisionSeconds))
+		if pub, _ := database.IsEventPublic(id); pub {
+			if turn, err := database.GetRollTurn(id, turnID); err == nil {
+				p.Send(printer.FormatStatus(turn.Username, "vetoed", turn.DecisionSeconds))
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}

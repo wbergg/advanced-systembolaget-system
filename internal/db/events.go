@@ -493,6 +493,15 @@ func (db *DB) ToggleEventPublic(eventID int, isAdmin bool) (bool, error) {
 	return true, nil
 }
 
+func (db *DB) IsEventPublic(eventID int) (bool, error) {
+	var public bool
+	err := db.conn.QueryRow("SELECT public FROM events WHERE id = ?", eventID).Scan(&public)
+	if err != nil {
+		return false, err
+	}
+	return public, nil
+}
+
 func (db *DB) GetPublicEvent() (*Event, error) {
 	var ev Event
 	err := db.conn.QueryRow(`
