@@ -484,8 +484,7 @@ onMounted(loadLists)
               <img v-if="item.imageUrl" :src="item.imageUrl.replace('_400.', '_60.')" class="list-thumb" />
             </td>
             <td>
-              <strong>{{ item.productNameBold }}</strong>
-              <span v-if="item.productNameThin" class="text-muted"> {{ item.productNameThin }}</span>
+              <strong>{{ item.productNameBold }}</strong><span v-if="item.productNameThin" class="text-muted">&nbsp;{{ item.productNameThin }}</span>
               <br><span class="text-small text-muted">{{ item.producerName }}</span>
             </td>
             <td class="text-muted">{{ item.categoryLevel1 }}</td>
