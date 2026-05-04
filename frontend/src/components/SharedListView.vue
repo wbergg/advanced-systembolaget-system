@@ -119,7 +119,7 @@ function tastePreview(item: SharedListItem) {
               <p class="sb-card-category">{{ item.categoryLevel1 }} &middot; {{ item.categoryLevel2 }}</p>
               <h3 class="sb-card-name">
                 {{ item.productNameBold }}
-                <span v-if="item.productNameThin" class="sb-card-name-thin">{{ item.productNameThin }}</span>
+                <span v-if="item.productNameThin" class="sb-card-name-thin"> {{ item.productNameThin }}</span>
               </h3>
               <p class="sb-card-producer">{{ item.producerName }}</p>
               <div class="sb-card-meta">
@@ -151,7 +151,7 @@ function tastePreview(item: SharedListItem) {
               <p class="sb-list-category">{{ item.categoryLevel1 }} &middot; {{ item.categoryLevel2 }}</p>
               <h3 class="sb-list-name">
                 {{ item.productNameBold }}
-                <span v-if="item.productNameThin" class="sb-card-name-thin">{{ item.productNameThin }}</span>
+                <span v-if="item.productNameThin" class="sb-card-name-thin"> {{ item.productNameThin }}</span>
               </h3>
               <p class="sb-list-producer">{{ item.producerName }}</p>
             </div>
