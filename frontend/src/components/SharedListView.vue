@@ -8,6 +8,7 @@ const list = ref<SharedList | null>(null)
 const loading = ref(true)
 const error = ref('')
 const listView = ref<'grid' | 'list'>('grid')
+const sortBy = ref<'default' | 'name-asc' | 'name-desc'>('default')
 
 onMounted(async () => {
   // Hide the main app styling for the public page
@@ -24,7 +25,13 @@ onMounted(async () => {
   }
 })
 
-const items = computed(() => list.value?.items || [])
+const items = computed(() => {
+  const raw = list.value?.items || []
+  if (sortBy.value === 'default') return raw
+  const collator = new Intl.Collator('sv', { sensitivity: 'base' })
+  const sorted = [...raw].sort((a, b) => collator.compare(a.productNameBold, b.productNameBold))
+  return sortBy.value === 'name-desc' ? sorted.reverse() : sorted
+})
 
 function slugify(str: string) {
   return str.toLowerCase()
@@ -84,8 +91,17 @@ function tastePreview(item: SharedListItem) {
 
         <h1 class="sb-heading">{{ list.name }}</h1>
 
-        <!-- View toggle -->
-        <div v-if="items.length > 0" class="sb-view-toggle">
+        <!-- Sort + view controls -->
+        <div v-if="items.length > 0" class="sb-controls">
+          <label class="sb-sort">
+            <span class="sb-sort-label">Sort:</span>
+            <select v-model="sortBy" class="sb-sort-select">
+              <option value="default">Default</option>
+              <option value="name-asc">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
+            </select>
+          </label>
+          <div class="sb-view-toggle">
           <button
             class="sb-toggle-btn" :class="{ active: listView === 'grid' }"
             @click="listView = 'grid'" title="Rutn&auml;t"
@@ -98,6 +114,7 @@ function tastePreview(item: SharedListItem) {
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="0" y="1" width="16" height="2" rx="1"/><rect x="0" y="7" width="16" height="2" rx="1"/><rect x="0" y="13" width="16" height="2" rx="1"/></svg>
           </button>
+          </div>
         </div>
 
         <!-- Grid view -->
@@ -265,12 +282,54 @@ function tastePreview(item: SharedListItem) {
   letter-spacing: -0.02em;
 }
 
+/* Controls row (sort + view toggle) */
+.sb-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.sb-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.sb-sort-label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.7rem;
+  color: #888;
+}
+
+.sb-sort-select {
+  border: 1px solid #d4d4d4;
+  background: #fff;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: #2D2926;
+  cursor: pointer;
+}
+
+.sb-sort-select:hover {
+  border-color: #999;
+}
+
+.sb-sort-select:focus {
+  outline: none;
+  border-color: #2D2926;
+}
+
 /* View toggle */
 .sb-view-toggle {
   display: flex;
-  justify-content: flex-end;
   gap: 0.25rem;
-  margin-bottom: 1rem;
 }
 
 .sb-toggle-btn {
