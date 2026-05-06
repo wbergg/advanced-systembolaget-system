@@ -24,7 +24,7 @@ func writeLogo(sb *strings.Builder) {
 
 // FormatRoll returns a single receipt string for a roll event.
 // Goes in full to the stext field.
-func FormatRoll(username, producer, productBold, productThin, country, status string) string {
+func FormatRoll(username, producer, productBold, productThin, country, volumeText string, alcoholPct float64, status string) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n")
 	writeLogo(&sb)
@@ -34,7 +34,12 @@ func FormatRoll(username, producer, productBold, productThin, country, status st
 	sb.WriteString(" ")
 	sb.WriteString(statusVerb(status))
 	sb.WriteString("\n")
-	sb.WriteString(strings.TrimSpace(productBold + " " + productThin))
+	productLine := strings.TrimSpace(productBold + " " + productThin)
+	productLine += fmt.Sprintf(" %.1f%%", alcoholPct)
+	if volumeText != "" {
+		productLine += " " + volumeText
+	}
+	sb.WriteString(productLine)
 	sb.WriteString("\n")
 	sb.WriteString(producer)
 	sb.WriteString("\n")

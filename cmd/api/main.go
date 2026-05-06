@@ -1131,7 +1131,7 @@ func formatTurnReceipt(t *db.RollTurn) string {
 	if t.ProductNameThin != nil {
 		thin = *t.ProductNameThin
 	}
-	return printer.FormatRoll(t.Username, t.ProducerName, t.ProductNameBold, thin, t.Country, t.Status)
+	return printer.FormatRoll(t.Username, t.ProducerName, t.ProductNameBold, thin, t.Country, t.VolumeText, t.AlcoholPercent, t.Status)
 }
 
 func requireOwnerOrAdmin(c *gin.Context, database *db.DB, eventID int) bool {

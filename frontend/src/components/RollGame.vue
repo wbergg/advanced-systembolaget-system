@@ -218,7 +218,7 @@ onUnmounted(() => {
               {{ state.pendingTurn.productNameThin }}
             </div>
             <div class="beer-producer">
-              {{ state.pendingTurn.producerName }}<span v-if="state.pendingTurn.alcoholPercent"> · {{ state.pendingTurn.alcoholPercent }}%</span>
+              {{ state.pendingTurn.producerName }}<span v-if="state.pendingTurn.alcoholPercent"> · {{ state.pendingTurn.alcoholPercent }}%</span><span v-if="state.pendingTurn.volumeText"> · {{ state.pendingTurn.volumeText }}</span>
             </div>
           </div>
         </div>
@@ -275,7 +275,7 @@ onUnmounted(() => {
           <div class="consumed-info">
             <span class="consumed-name">{{ item.productNameBold }}</span>
             <span class="consumed-meta">
-              <span v-if="item.alcoholPercent">{{ item.alcoholPercent }}% · </span>vetoed by <strong>{{ item.vetoedByName }}</strong> — {{ formatDate(item.vetoedAt) }}
+              <span v-if="item.alcoholPercent">{{ item.alcoholPercent }}% · </span><span v-if="item.volumeText">{{ item.volumeText }} · </span>vetoed by <strong>{{ item.vetoedByName }}</strong> — {{ formatDate(item.vetoedAt) }}
             </span>
           </div>
           <i v-if="canManage" class="pi pi-undo consumed-undo" title="Undo veto — restore veto allowance" @click="doUndoVeto(item.poolId)"></i>
@@ -298,7 +298,7 @@ onUnmounted(() => {
           <div class="consumed-info">
             <span class="consumed-name">{{ item.productNameBold }}</span>
             <span class="consumed-meta">
-              <span v-if="item.alcoholPercent">{{ item.alcoholPercent }}% · </span>consumed by <strong>{{ item.consumedByName }}</strong> — {{ formatDate(item.consumedAt) }}
+              <span v-if="item.alcoholPercent">{{ item.alcoholPercent }}% · </span><span v-if="item.volumeText">{{ item.volumeText }} · </span>consumed by <strong>{{ item.consumedByName }}</strong> — {{ formatDate(item.consumedAt) }}
             </span>
           </div>
           <i v-if="canManage" class="pi pi-undo consumed-undo" title="Undo — put back in pool" @click="doUndo(item.id)"></i>
