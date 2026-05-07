@@ -266,10 +266,18 @@ func (db *DB) GetEvent(id, userID int, isAdmin bool) (*Event, error) {
 	return &ev, nil
 }
 
-func (db *DB) UpdateEvent(id int, name, description, eventDate string, userID int) error {
-	res, err := db.conn.Exec(
-		"UPDATE events SET name = ?, description = ?, event_date = ? WHERE id = ? AND user_id = ?",
-		name, description, eventDate, id, userID)
+func (db *DB) UpdateEvent(id int, name, description, eventDate string, userID int, isAdmin bool) error {
+	var res sql.Result
+	var err error
+	if isAdmin {
+		res, err = db.conn.Exec(
+			"UPDATE events SET name = ?, description = ?, event_date = ? WHERE id = ?",
+			name, description, eventDate, id)
+	} else {
+		res, err = db.conn.Exec(
+			"UPDATE events SET name = ?, description = ?, event_date = ? WHERE id = ? AND user_id = ?",
+			name, description, eventDate, id, userID)
+	}
 	if err != nil {
 		return err
 	}

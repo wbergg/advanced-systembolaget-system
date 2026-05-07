@@ -41,6 +41,8 @@ onMounted(async () => {
 
       <template v-else-if="data">
         <h1 class="sb-heading">{{ data.eventName }}</h1>
+        <div v-if="data.eventDate" class="sb-event-date">{{ data.eventDate }}</div>
+        <p v-if="data.description" class="sb-event-desc">{{ data.description }}</p>
         <RollGame
           :eventId="0"
           :participants="data.participants"
@@ -90,8 +92,21 @@ onMounted(async () => {
 .sb-heading {
   font-size: 1.5rem;
   font-weight: 700;
-  margin: 0 0 1rem 0;
+  margin: 0 0 0.4rem 0;
   letter-spacing: -0.02em;
+}
+
+.sb-event-date {
+  font-size: 0.95rem;
+  color: #666;
+  margin-bottom: 0.4rem;
+}
+
+.sb-event-desc {
+  font-size: 0.95rem;
+  color: #444;
+  margin: 0 0 1rem 0;
+  white-space: pre-wrap;
 }
 
 .sb-loading {

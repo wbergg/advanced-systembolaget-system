@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
 import Checkbox from 'primevue/checkbox'
 import Select from 'primevue/select'
 import RollGame from './RollGame.vue'
@@ -10,7 +11,7 @@ import {
   getEvent, setEventLocked, inviteToEvent, uninviteFromEvent,
   importSharedListToEvent, removeBeerFromEvent, setScore, deleteScore,
   listAllUsers, listSharedLists, setEventHidden, toggleEventPublic,
-  deleteEvent, archiveEvent, unarchiveEvent,
+  deleteEvent, archiveEvent, unarchiveEvent, updateEvent,
   type Event, type EventBeer, type ShareUser, type SharedList
 } from '../api/client'
 
@@ -35,6 +36,33 @@ const importDialogVisible = ref(false)
 const editingCell = ref<{ beerId: number; userId: number } | null>(null)
 const editValue = ref<string>('')
 const saving = ref(false)
+
+// Event metadata editing
+const editDialogVisible = ref(false)
+const editDate = ref('')
+const editDesc = ref('')
+const editSaving = ref(false)
+
+function openEditDialog() {
+  if (!event.value) return
+  editDate.value = event.value.eventDate || ''
+  editDesc.value = event.value.description || ''
+  editDialogVisible.value = true
+}
+
+async function saveEventMeta() {
+  if (!event.value || editSaving.value) return
+  editSaving.value = true
+  try {
+    await updateEvent(event.value.id, event.value.name, editDesc.value.trim(), editDate.value.trim())
+    editDialogVisible.value = false
+    await loadEvent()
+  } catch (e: any) {
+    alert(e?.message || 'Failed to update event')
+  } finally {
+    editSaving.value = false
+  }
+}
 
 function isOwner() {
   return event.value?.ownerId === authStore.user?.id
@@ -258,6 +286,7 @@ onMounted(loadEvent)
         <div class="detail-actions">
           <Button v-if="isRoll && isAdminUser" :label="event.public ? 'Unpublish' : 'Publish'" icon="pi pi-globe" size="small" :severity="event.public ? 'success' : 'secondary'" @click="togglePublic" />
           <Button v-if="isRoll && isAdminUser" :label="event.hidden ? 'Reveal' : 'Hide'" :icon="event.hidden ? 'pi pi-eye' : 'pi pi-eye-slash'" size="small" :severity="event.hidden ? 'success' : 'warn'" @click="toggleHidden" />
+          <Button v-if="canEdit() && !isArchived" label="Edit" icon="pi pi-pencil" size="small" severity="secondary" @click="openEditDialog" />
           <Button v-if="canEdit()" :label="event.locked ? 'Unlock' : 'Lock'" :icon="event.locked ? 'pi pi-lock-open' : 'pi pi-lock'" size="small" :severity="event.locked ? 'warn' : 'secondary'" @click="toggleLock" />
           <Button v-if="isOwner()" label="Invite" icon="pi pi-user-plus" size="small" severity="secondary" @click="openInviteDialog" />
           <Button v-if="canEdit() && !event.locked && !isArchived" label="Import List" icon="pi pi-download" size="small" severity="secondary" @click="openImportDialog" />
@@ -367,6 +396,20 @@ onMounted(loadEvent)
           <span class="invite-username">{{ u.username }}</span>
           <span v-if="isInvited(u.userId)" class="invite-status">Invited</span>
         </label>
+      </div>
+    </Dialog>
+
+    <!-- Edit event dialog -->
+    <Dialog v-model:visible="editDialogVisible" modal header="Edit Event" :style="{ width: '400px', maxWidth: '95vw' }">
+      <div class="edit-body">
+        <label class="edit-label">Date</label>
+        <InputText v-model="editDate" placeholder="Date (e.g. 2026-04-10)" size="small" style="width: 100%;" />
+        <label class="edit-label">Description</label>
+        <InputText v-model="editDesc" placeholder="Description (optional)" size="small" style="width: 100%;" />
+        <div class="edit-actions">
+          <Button label="Cancel" size="small" severity="secondary" text @click="editDialogVisible = false" :disabled="editSaving" />
+          <Button label="Save" icon="pi pi-check" size="small" @click="saveEventMeta" :disabled="editSaving" />
+        </div>
       </div>
     </Dialog>
 
@@ -721,5 +764,28 @@ onMounted(loadEvent)
 
 .import-body {
   padding: 0.5rem 0;
+}
+
+.edit-body {
+  padding: 0.25rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.edit-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.5rem;
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }
 </style>

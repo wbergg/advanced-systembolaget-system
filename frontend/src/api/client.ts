@@ -759,6 +759,8 @@ export async function toggleEventPublic(eventId: number): Promise<{ public: bool
 // Public roll endpoints (no auth)
 export interface PublicRollData {
   eventName: string
+  description?: string
+  eventDate?: string
   state: RollState
   participants: { userId: number; username: string }[]
 }

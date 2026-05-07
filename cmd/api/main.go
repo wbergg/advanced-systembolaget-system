@@ -708,7 +708,7 @@ func updateEventHandler(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 			return
 		}
-		if err := database.UpdateEvent(id, body.Name, body.Description, body.EventDate, claims.UserID); err != nil {
+		if err := database.UpdateEvent(id, body.Name, body.Description, body.EventDate, claims.UserID, claims.Role == "admin"); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
@@ -1496,6 +1496,8 @@ func getPublicRollHandler(database *db.DB) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"eventName":    ev.Name,
+			"description":  ev.Description,
+			"eventDate":    ev.EventDate,
 			"state":        state,
 			"participants": participants,
 		})
