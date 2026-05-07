@@ -79,7 +79,7 @@ Create collaborative shopping lists, add products with quantities, and share the
 
 ### Tasting events
 
-Organize tastings: create an event, invite users, add beers, and score each product 0-10. Supports importing beers directly from a shared list. Lock events when scoring is complete.
+Organize tastings: create an event, invite users, add beers, and score each product 0-10. Beers can be imported from a shared list or added manually. Lock events when scoring is complete, then archive past events to keep the active list clean (admins can browse the archive separately).
 
 ### Roll game
 
@@ -100,7 +100,7 @@ The public roll endpoints require no authentication, so external apps can integr
 | `POST` | `/api/public/roll/:turnId/accept` | Accept the pending roll |
 | `POST` | `/api/public/roll/:turnId/veto` | Veto the pending roll |
 
-`GET /api/public/roll` returns the event name, participant list, pool/consumed/vetoed counts, and the current pending turn (including `canVeto`, country, ABV%, and `decisionSeconds` once resolved). Returns `404` when no event is published.
+`GET /api/public/roll` returns the event name, participant list, pool/consumed/vetoed counts, and the current pending turn (including `canVeto`, country, ABV%, volume, and `decisionSeconds` once resolved). Returns `404` when no event is published.
 
 ### Comments & notes
 
@@ -120,10 +120,10 @@ All endpoints are under `/api/`. Authentication uses JWT tokens (24h expiry).
 | Products | `GET /products`, `GET /products/:id`, `GET /products/distinct/:column`, `PATCH /products/:id/notes` |
 | Comments | `GET /products/:id/comments`, `POST /products/:id/comments` |
 | Sync | `POST /sync` (SSE), `POST /key/refresh`, `GET /key/status` |
-| Events | CRUD on `/events`, attendees, beers, scores, list import |
+| Events | CRUD on `/events`, attendees, beers, scores, list import, locking, `POST /events/:id/archive`, `POST /events/:id/unarchive` |
 | Roll game | `/events/:id/roll` (state, roll, accept, veto, reset, undo veto/consumed), `/events/:id/public` (publish), `/events/:id/visibility` (hide), `/public/roll` (public access) |
 | Shared lists | CRUD on `/shared-lists`, items, locking, sharing, public view at `/public/shared-list/:uuid` |
-| Admin | `/admin/users` CRUD, `POST /admin/impersonate/:id`, `DELETE /admin/comments/:id`, `DELETE /admin/products`, `GET /admin/debug/sb-probe/:number` |
+| Admin | `/admin/users` CRUD, `POST /admin/impersonate/:id`, `DELETE /admin/comments/:id`, `POST /admin/products`, `DELETE /admin/products/:id`, `DELETE /admin/products`, `GET /admin/events/archived`, `GET /admin/debug/sb-probe/:number` |
 
 ## CLI tool
 
