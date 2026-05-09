@@ -20,11 +20,12 @@ type RollPoolItem struct {
 	VolumeText      string  `json:"volumeText"`
 	Style           string  `json:"style"`
 	ImageURL        string  `json:"imageUrl"`
-	Consumed        bool    `json:"consumed"`
-	ConsumedByUID   *int    `json:"consumedByUserId,omitempty"`
-	ConsumedByName  *string `json:"consumedByName,omitempty"`
-	ConsumedAt      *string `json:"consumedAt,omitempty"`
-	Vetoed          bool    `json:"vetoed"`
+	Consumed        bool     `json:"consumed"`
+	ConsumedByUID   *int     `json:"consumedByUserId,omitempty"`
+	ConsumedByName  *string  `json:"consumedByName,omitempty"`
+	ConsumedAt      *string  `json:"consumedAt,omitempty"`
+	Vetoed          bool     `json:"vetoed"`
+	DecisionSeconds *float64 `json:"decisionSeconds,omitempty"`
 }
 
 type RollTurn struct {
@@ -60,8 +61,9 @@ type VetoedItem struct {
 	VolumeText      string  `json:"volumeText"`
 	Style           string  `json:"style"`
 	ImageURL        string  `json:"imageUrl"`
-	VetoedByName    string  `json:"vetoedByName"`
-	VetoedAt        string  `json:"vetoedAt"`
+	VetoedByName    string   `json:"vetoedByName"`
+	VetoedAt        string   `json:"vetoedAt"`
+	DecisionSeconds *float64 `json:"decisionSeconds,omitempty"`
 }
 
 type RollState struct {
@@ -92,10 +94,11 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 	// Consumed items
 	rows, err := db.conn.Query(`
 		SELECT rp.id, rp.product_id, p.name_bold, p.name_thin, p.producer_name, p.country, p.alcohol_pct, p.volume, p.volume_text, COALESCE(p.category_level3, ''), COALESCE(p.image_url, ''),
-			rp.consumed_by, u.username, rp.consumed_at, rp.vetoed
+			rp.consumed_by, u.username, rp.consumed_at, rp.vetoed, rt.decision_seconds
 		FROM roll_pool rp
 		JOIN products p ON rp.product_id = p.product_id
 		LEFT JOIN users u ON rp.consumed_by = u.id
+		LEFT JOIN roll_turns rt ON rt.pool_id = rp.id AND rt.event_id = rp.event_id AND rt.status = 'accepted'
 		WHERE rp.event_id = ? AND rp.consumed = 1
 		ORDER BY rp.consumed_at DESC
 	`, eventID)
@@ -108,7 +111,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 		item.Consumed = true
 		if err := rows.Scan(&item.ID, &item.ProductID, &item.ProductNameBold, &item.ProductNameThin,
 			&item.ProducerName, &item.Country, &item.AlcoholPercent, &item.Volume, &item.VolumeText, &item.Style, &item.ImageURL,
-			&item.ConsumedByUID, &item.ConsumedByName, &item.ConsumedAt, &item.Vetoed); err != nil {
+			&item.ConsumedByUID, &item.ConsumedByName, &item.ConsumedAt, &item.Vetoed, &item.DecisionSeconds); err != nil {
 			return nil, err
 		}
 		state.Consumed = append(state.Consumed, item)
@@ -117,7 +120,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 	// Vetoed items (pool entries that were vetoed and are back in the pool)
 	vetoRows, err := db.conn.Query(`
 		SELECT rp.id, p.name_bold, p.name_thin, p.producer_name, p.country, p.alcohol_pct, p.volume, p.volume_text, COALESCE(p.category_level3, ''), COALESCE(p.image_url, ''),
-			u.username, rt.resolved_at
+			u.username, rt.resolved_at, rt.decision_seconds
 		FROM roll_turns rt
 		JOIN roll_pool rp ON rt.pool_id = rp.id
 		JOIN products p ON rp.product_id = p.product_id
@@ -132,7 +135,7 @@ func (db *DB) GetRollState(eventID int) (*RollState, error) {
 	for vetoRows.Next() {
 		var v VetoedItem
 		if err := vetoRows.Scan(&v.PoolID, &v.ProductNameBold, &v.ProductNameThin,
-			&v.ProducerName, &v.Country, &v.AlcoholPercent, &v.Volume, &v.VolumeText, &v.Style, &v.ImageURL, &v.VetoedByName, &v.VetoedAt); err != nil {
+			&v.ProducerName, &v.Country, &v.AlcoholPercent, &v.Volume, &v.VolumeText, &v.Style, &v.ImageURL, &v.VetoedByName, &v.VetoedAt, &v.DecisionSeconds); err != nil {
 			return nil, err
 		}
 		state.Vetoed = append(state.Vetoed, v)
