@@ -33,14 +33,14 @@ The app is available at `http://localhost:8080`. Log in with the admin credentia
 ### Build from source
 
 ```bash
-# Build frontend
-cd frontend && npm ci && npm run build && cd ..
+# Everything (frontend + both binaries)
+make all
 
-# Build API server
-go build -o systemet-ass ./cmd/api
-
-# Build CLI tool
-go build -o systemet-poll-cli ./cmd/cli
+# Or step by step
+make frontend   # cd frontend && npm ci && npm run build
+make api        # go build -o systemet-ass ./cmd/api
+make cli        # go build -o systemet-poll-cli ./cmd/cli
+make clean      # remove binaries and frontend/dist
 ```
 
 Run the server:
