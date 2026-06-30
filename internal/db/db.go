@@ -34,6 +34,15 @@ func Open(path string) (*DB, error) {
 }
 
 func (db *DB) Close() error {
+	// Fold the WAL back into the main database file before closing. Without an
+	// explicit checkpoint the WAL is only merged when the last connection
+	// closes cleanly or it crosses the auto-checkpoint threshold; on a low-write
+	// workload that can mean the main .db file goes stale for a long time.
+	if _, err := db.conn.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		// Best-effort: still close even if the checkpoint fails.
+		_ = db.conn.Close()
+		return fmt.Errorf("checkpoint wal: %w", err)
+	}
 	return db.conn.Close()
 }
 

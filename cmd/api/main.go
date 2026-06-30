@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -10,8 +11,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	systemetpoll "advanced-systembolaget-system"
 	"advanced-systembolaget-system/internal/auth"
@@ -198,7 +202,29 @@ func main() {
 
 	listenAddr := appCfg.ListenIP + ":" + appCfg.Port
 	log.Printf("Starting server on %s", listenAddr)
-	r.Run(listenAddr)
+
+	srv := &http.Server{Addr: listenAddr, Handler: r}
+
+	// Listen for SIGINT/SIGTERM so the deferred database.Close() (which
+	// checkpoints the WAL into the main .db file) actually runs on restart.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	stop()
+	log.Println("Shutting down server...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
 }
 
 // spaHandler serves static files, falling back to index.html for SPA routes.
